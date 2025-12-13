@@ -1,0 +1,262 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Temperature Reader</title>
+
+    <!--Library JS Crop Image-->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/cropperjs/1.5.13/cropper.min.css"/>
+
+    <!--Tailwind CDN JS-->
+    <script src="https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4"></script>
+
+    <!--Some Override Style-->
+    <style>
+    .cropper-container {
+        width: 100%;
+        height: 100%;
+    }
+    #imageSource {
+        display: block;
+        max-width: 100%;
+    }
+    </style>
+</head>
+<body class="bg-gray-50 text-gray-800 min-h-screen">
+
+    <div class="max-w-4xl mx-auto p-6">
+
+        <div class="text-center mb-8">
+            <h1 class="text-3xl font-bold text-blue-700 mb-2">Temperature Reader</h1>
+            <p class="text-gray-600">Upload 1 foto panel, lalu crop bagian <span class="font-semibold text-blue-600">Setpoint</span> dan <span class="font-semibold text-red-600">Air Temperature</span>.</p>
+        </div>
+
+        <div class="bg-white p-6 rounded-xl shadow-md mb-6">
+            <div class="mb-4">
+                <label class="block mb-2 text-sm font-medium text-gray-900" for="fileInput">Upload Foto Panel</label>
+                <input class="block w-full text-sm text-gray-900 border border-gray-300 rounded-lg cursor-pointer bg-gray-50 focus:outline-none p-2" id="fileInput" type="file" accept="image/*">
+            </div>
+
+            <div class="relative w-full h-96 bg-gray-200 border-2 border-dashed border-gray-400 rounded-lg overflow-hidden flex justify-center items-center">
+                <img id="imageSource" class="max-w-full max-h-full hidden" alt="Source Image">
+                <div id="placeholder-text" class="text-gray-500 font-medium">Preview gambar akan muncul di sini</div>
+            </div>
+
+            <div id="cropControls" class="hidden mt-4 flex flex-wrap gap-4 justify-center">
+                <button onclick="capture('setpoint')" class="flex items-center gap-2 px-6 py-2 bg-blue-600 hover:bg-blue-700 text-white font-semibold rounded-lg shadow transition">
+                    <span>1. Ambil Setpoint</span>
+                </button>
+                <button onclick="capture('airtemp')" class="flex items-center gap-2 px-6 py-2 bg-red-600 hover:bg-red-700 text-white font-semibold rounded-lg shadow transition">
+                    <span>2. Ambil Air Temp</span>
+                </button>
+            </div>
+        </div>
+
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-6 mb-6">
+
+            <div class="bg-white p-4 rounded-xl shadow-md border-l-4 border-blue-500">
+                <h4 class="font-bold text-lg mb-2 text-blue-700">Setpoint Image</h4>
+                <div class="h-32 bg-gray-100 rounded-md flex justify-center items-center overflow-hidden border border-gray-200">
+                    <img id="preview-setpoint" class="h-full object-contain hidden">
+                    <span id="text-setpoint" class="text-xs text-gray-400">Belum diambil</span>
+                </div>
+                <div id="status-setpoint" class="mt-2 text-sm font-semibold text-gray-400 text-center">Waiting...</div>
+            </div>
+
+            <div class="bg-white p-4 rounded-xl shadow-md border-l-4 border-red-500">
+                <h4 class="font-bold text-lg mb-2 text-red-700">Air Temperature Image</h4>
+                <div class="h-32 bg-gray-100 rounded-md flex justify-center items-center overflow-hidden border border-gray-200">
+                    <img id="preview-airtemp" class="h-full object-contain hidden">
+                    <span id="text-airtemp" class="text-xs text-gray-400">Belum diambil</span>
+                </div>
+                <div id="status-airtemp" class="mt-2 text-sm font-semibold text-gray-400 text-center">Waiting...</div>
+            </div>
+        </div>
+
+        <button id="btnProcess" onclick="sendData()" disabled
+            class="w-full py-4 bg-gray-300 text-gray-500 font-bold rounded-xl text-lg shadow-sm transition cursor-not-allowed">
+            LENGKAPI KEDUA GAMBAR DULU
+        </button>
+
+        <div id="resultBox" class="hidden mt-8 bg-white p-6 rounded-xl shadow-lg border border-gray-200 text-center animate-pulse">
+            <h3 class="text-xl font-bold text-gray-800 mb-4">Hasil Pembacaan AI</h3>
+            <div id="resultContent" class="space-y-4">
+                Loading...
+            </div>
+        </div>
+
+    </div>
+
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/cropperjs/1.5.13/cropper.min.js"></script>
+    <script>
+        let cropper;
+        const image = document.getElementById('imageSource');
+        const fileInput = document.getElementById('fileInput');
+        const cropControls = document.getElementById('cropControls');
+        const placeholder = document.getElementById('placeholder-text');
+
+        let cropData = {
+            setpoint: null,
+            airtemp: null
+        };
+
+        // 1. Handle File Upload dengan Pemuatan Gambar yang Aman
+        fileInput.addEventListener('change', function(e) {
+            const file = e.target.files[0];
+            if (file) {
+                const reader = new FileReader();
+
+                reader.onload = function(evt) {
+                    // Reset UI
+                    if (cropper) {
+                        cropper.destroy();
+                        cropper = null; // Pastikan null setelah destroy
+                    }
+
+                    // Set source gambar
+                    image.src = evt.target.result;
+
+                    // PENTING: Tunggu gambar benar-benar load sebelum pasang Cropper
+                    image.onload = function() {
+                        image.classList.remove('hidden');
+                        placeholder.classList.add('hidden');
+                        cropControls.classList.remove('hidden');
+                        cropControls.classList.add('flex');
+
+                        // Inisialisasi Cropper setelah gambar siap
+                        cropper = new Cropper(image, {
+                            viewMode: 1,
+                            dragMode: 'move',
+                            autoCropArea: 0.8, // Perbesar area crop awal
+                            restore: false,
+                            guides: true,
+                            center: true,
+                            highlight: false,
+                            cropBoxMovable: true,
+                            cropBoxResizable: true,
+                            toggleDragModeOnDblclick: false,
+                            background: false, // Matikan background checkerboard biar lebih ringan
+                        });
+                    };
+                };
+                reader.readAsDataURL(file);
+            }
+        });
+
+        // 2. Fungsi Capture Crop yang Diperbaiki
+        function capture(type) {
+            if (!cropper) return;
+
+            // FIX: Jangan paksa width/height dulu, biarkan sesuai cropbox
+            // Tambahkan fillColor: '#fff' untuk mencegah background hitam pada JPEG
+            const canvas = cropper.getCroppedCanvas({
+                fillColor: '#fff',
+                imageSmoothingEnabled: true,
+                imageSmoothingQuality: 'high',
+            });
+
+            if (!canvas) {
+                alert("Gagal mengambil gambar. Pastikan area crop valid.");
+                return;
+            }
+
+            // Kita resize manual di canvas baru jika perlu, atau kirim langsung
+            // Di sini kita kirim langsung tapi kompresi JPEG 0.9
+            const base64Image = canvas.toDataURL('image/jpeg', 0.9);
+
+            // Simpan Data
+            cropData[type] = base64Image;
+
+            // Update UI Preview
+            const imgEl = document.getElementById(`preview-${type}`);
+            const textEl = document.getElementById(`text-${type}`);
+            const statusEl = document.getElementById(`status-${type}`);
+
+            imgEl.src = base64Image;
+            imgEl.classList.remove('hidden');
+            textEl.classList.add('hidden');
+
+            statusEl.innerHTML = "Gambar Tersimpan";
+            statusEl.className = "mt-2 text-sm font-bold text-green-600 text-center";
+
+            checkReady();
+        }
+
+        function checkReady() {
+            const btn = document.getElementById('btnProcess');
+            if (cropData.setpoint && cropData.airtemp) {
+                btn.disabled = false;
+                btn.innerHTML = "PROSES BACA SUHU SEKARANG";
+                btn.className = "w-full py-4 bg-green-600 hover:bg-green-700 text-white font-bold rounded-xl text-lg shadow-lg transform hover:scale-105 transition cursor-pointer";
+            }
+        }
+
+        async function sendData() {
+            const resultBox = document.getElementById('resultBox');
+            const resultContent = document.getElementById('resultContent');
+            const btn = document.getElementById('btnProcess');
+
+            resultBox.classList.remove('hidden');
+            resultContent.innerHTML = `<div class="text-gray-500">⏳ Sedang menganalisis gambar dengan CRNN...</div>`;
+            btn.disabled = true;
+            btn.innerHTML = "Sedang Memproses...";
+            btn.className = "w-full py-4 bg-gray-400 text-white font-bold rounded-xl text-lg shadow-none cursor-wait";
+
+            try {
+                const response = await fetch('/api/read-meter', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        setpoint_image: cropData.setpoint,
+                        air_temp_image: cropData.airtemp
+                    })
+                });
+
+                const json = await response.json();
+                resultBox.classList.remove('animate-pulse');
+
+                if (json.status === 1) {
+                    resultContent.innerHTML = `
+                        <div class="grid grid-cols-2 gap-4">
+                            <div class="bg-blue-50 p-4 rounded-lg border border-blue-200">
+                                <p class="text-sm text-gray-500 uppercase font-bold">Setpoint Code</p>
+                                <p class="text-3xl font-mono font-bold text-blue-700">${json.data.setpoint_code}</p>
+                            </div>
+                            <div class="bg-red-50 p-4 rounded-lg border border-red-200">
+                                <p class="text-sm text-gray-500 uppercase font-bold">Air Temperature</p>
+                                <p class="text-3xl font-mono font-bold text-red-700">${json.data.air_temperature}</p>
+                            </div>
+                        </div>
+                        <div class="mt-4 text-xs text-gray-400">
+                            Timestamp: ${json.data.timestamp}
+                        </div>
+                        <button onclick="location.reload()" class="mt-4 px-4 py-2 bg-gray-800 text-white text-sm rounded hover:bg-gray-900 transition">
+                            Scan Lagi
+                        </button>
+                    `;
+                } else {
+                    resultContent.innerHTML = `
+                        <div class="p-4 bg-red-100 text-red-700 rounded-lg">
+                            Error: ${json.message}
+                        </div>
+                        <button onclick="location.reload()" class="mt-4 px-4 py-2 bg-gray-800 text-white text-sm rounded">Coba Lagi</button>
+                    `;
+                }
+
+            } catch (err) {
+                console.error(err);
+                resultBox.classList.remove('animate-pulse');
+                resultContent.innerHTML = `
+                    <div class="p-4 bg-red-100 text-red-700 rounded-lg">
+                        Gagal menghubungi server. Pastikan backend (main.py) berjalan.
+                    </div>
+                `;
+                btn.disabled = false;
+                btn.innerHTML = "Coba Kirim Ulang";
+                btn.className = "w-full py-4 bg-red-500 hover:bg-red-600 text-white font-bold rounded-xl text-lg shadow-lg transition cursor-pointer";
+            }
+        }
+    </script>
+</body>
+</html>
