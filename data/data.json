@@ -1,0 +1,14 @@
+[
+    {
+        "setpoint_code": "-25.",
+        "air_temperature": "-10.0.",
+        "timestamp": "2025-12-13 23:42:41",
+        "source": "camera"
+    },
+    {
+        "setpoint_code": "-20.0",
+        "air_temperature": "-9.2",
+        "timestamp": "2025-12-13 23:42:28",
+        "source": "upload"
+    }
+]

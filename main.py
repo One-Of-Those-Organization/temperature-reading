@@ -1,5 +1,6 @@
 import os
 import io
+import json
 import base64
 import traceback
 import torch
@@ -98,6 +99,7 @@ transform_pipeline = transforms.Compose([
 # FLASK APP SETUP
 # ==========================================
 app = Flask(__name__)
+data = "data/data.json"
 
 # Konfigurasi Device & Model Path
 DEVICE = "cuda" if torch.cuda.is_available() else "cpu" # EARLY WARNING : CHANGE this to DEVICE = "cpu" if you have some trouble with cuda
@@ -151,68 +153,122 @@ def predict_image(image_bytes):
 def index():
     return render_template('index.html')
 
+
 @app.route('/api/read-meter', methods=['POST'])
 def read_meter():
-    """
-    Endpoint utama untuk menerima 2 gambar hasil crop.
-    Menerima JSON:
-    {
-        "setpoint_image": "data:image/jpeg;base64,.....",
-        "air_temp_image": "data:image/jpeg;base64,....."
-    }
-    """
-    # Cek apakah model sudah siap
+    # Cek Model
     if model is None:
-        return jsonify({"status": 0, "message": "Model belum dimuat (file model.pt tidak ditemukan?)"}), 500
+        return jsonify({
+            "status": 1,
+            "message": "Model belum dimuat"
+        }), 500
 
     try:
         data = request.get_json()
 
-        # 1. Ambil string base64
+        # Ambil Data
         setpoint_b64 = data.get('setpoint_image', '')
         air_temp_b64 = data.get('air_temp_image', '')
+        source_type = data.get('source', 'camera')
 
-        # If the Payload is NULL then
         if not setpoint_b64 or not air_temp_b64:
-            return jsonify({"status": 0, "message": "Kedua gambar (Setpoint & Air Temp) harus dikirim!"}), 400
+            return jsonify({
+                "status": 2,
+                "message": "Gambar kurang!"
+            }), 400
 
-        # 2. Bersihkan header base64 (data:image/jpeg;base64,...)
+        # Decode Base64
         if "," in setpoint_b64: setpoint_b64 = setpoint_b64.split(",")[1]
         if "," in air_temp_b64: air_temp_b64 = air_temp_b64.split(",")[1]
 
-        # 3. Decode ke Bytes
-        setpoint_bytes = base64.b64decode(setpoint_b64)
-        air_temp_bytes = base64.b64decode(air_temp_b64)
+        sp_bytes = base64.b64decode(setpoint_b64)
+        air_bytes = base64.b64decode(air_temp_b64)
 
-        # 4. Prediksi dengan Model AI
-        # Model dipanggil dua kali untuk masing-masing potongan gambar
-        print("Menganalisis Setpoint...")
-        setpoint_result = predict_image(setpoint_bytes)
+        # Prediksi CRNN
+        setpoint_result = predict_image(sp_bytes)
+        air_temp_result = predict_image(air_bytes)
 
-        print("Menganalisis Air Temp...")
-        air_temp_result = predict_image(air_temp_bytes)
-
-        # 5. Format Timestamp
-        current_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-
-        print(f"Hasil -> SP: {setpoint_result}, Air: {air_temp_result}")
-
-        # 6. Kirim Respon JSON
-        response = {
-            "status": 1,
-            "message": "Sukses membaca meter",
-            "data": {
-                "setpoint_code": setpoint_result,
-                "air_temperature": air_temp_result,
-                "timestamp": current_time
-            }
+        # Buat Object Data Baru
+        result_data = {
+            "setpoint_code": setpoint_result,
+            "air_temperature": air_temp_result,
+            "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+            "source": source_type,
         }
-        return jsonify(response)
+
+        # Write to data/data.json
+        data_pointer = "data/data.json"
+        history_data = []
+
+        # Check Existed File
+        if os.path.exists(data_pointer):
+            try:
+                with open(data_pointer, "r") as f:
+                    file_content = json.load(f)
+
+                    # Pastikan formatnya List
+                    if isinstance(file_content, list):
+                        history_data = file_content
+                    else:
+                        history_data = [file_content]
+            except Exception as e:
+                print(f"Warning: File lama rusak/kosong, membuat baru. Error: {e}")
+                history_data = []
+
+        # Append New Data
+        history_data.insert(0, result_data)
+
+        # Set Limit Data
+        if len(history_data) >= 100:
+            history_data = history_data[:100]
+
+        # Write a new Data
+        try:
+            os.makedirs(os.path.dirname(data_pointer), exist_ok=True)  # Create New if NOT Exist
+            with open(data_pointer, "w") as f:
+                json.dump(history_data, f, indent=4)
+            print(f"Data tersimpan: {result_data['timestamp']}")
+        except Exception as e:
+            print(f"Gagal tulis data: {e}")
+
+        return jsonify({
+            "status": 0,
+            "message": "Send Data",
+            "data": result_data
+        })
 
     except Exception as e:
-        print("Server Error:")
+        print(f"Server Error: {e}")
         print(traceback.format_exc())
-        return jsonify({"status": 0, "message": f"Server Error: {str(e)}"}), 500
+        return jsonify({"status": 4, "message": str(e)}), 500
+
+@app.route('/api/get-meter', methods=['GET'])
+def get_meter():
+    data_path = "data/data.json"
+
+    # Check if data is existed
+    if not os.path.exists(data_path):
+        return jsonify({
+            "status": 5,
+            "message": "Data tidak ditemukan pada Server !"
+        })
+
+    # If data existed
+    try:
+        with open(data_path, "r") as f:
+            data = json.load(f)
+
+        return jsonify({
+            "status": 0,
+            "message": "Send Data",
+            "data": data
+        })
+    except Exception as e:
+        return jsonify({
+            "status": 6,
+            "message": f"Server Error: {str(e)}",
+            "data": "Tanya Fufufafa"
+        })
 
 if __name__ == '__main__':
     # Jalankan server di port 5000 atau ganti port lainnya
