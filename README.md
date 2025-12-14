@@ -5,13 +5,12 @@ Sistem berbasis web untuk membaca dan mendigitalkan nilai temperatur pada panel 
 Sistem ini menggantikan metode OCR konvensional (seperti Tesseract) dengan arsitektur **CRNN (Convolutional Recurrent Neural Network)** yang lebih tangguh terhadap gangguan visual (blur, pencahayaan minim, dll).
 
 ## Daftar Isi
-- [Project Overview](#-project-overview)
-- [Metodologi & Arsitektur AI](#-metodologi--arsitektur-ai)
-- [Struktur Project](#-struktur-project)
-- [Prasarat (Requirements)](#-prasarat-requirements)
-- [Cara Menjalankan (Installation & Run)](#-cara-menjalankan-installation--run)
-- [Cara Penggunaan](#-cara-penggunaan)
-- [Tim Pengembang](#-tim-pengembang)
+- [Project Overview](##-project-overview)
+- [Metodologi & Arsitektur AI](##-metodologi--arsitektur-ai)
+- [Struktur Project](##-struktur-project)
+- [Prasarat (Requirements)](##-prasarat-requirements)
+- [Cara Menjalankan (Installation & Run)](##-cara-menjalankan-installation--run)
+- [Cara Penggunaan](##-cara-penggunaan)
 
 ---
 
@@ -76,3 +75,55 @@ temperature-reading/
 ├── main.py                  # Backend Server utama (Flask App)
 ├── README.md                # Dokumentasi Proyek ini
 └── requirements.txt         # Daftar library Python yang dibutuhkan
+```
+
+---
+
+## Prasarat (Requirements)
+- Python 3.10+ (sesuaikan dengan versi di `requirements.txt`)
+- Pip / venv untuk manajemen paket
+- Camera device (opsional, untuk mode Live Camera)
+- Akses jaringan untuk memuat aset/model jika perlu
+- Sistem operasi: Linux / macOS / Windows (disarankan Linux/macOS untuk dev)
+
+---
+
+## Cara Menjalankan (Installation & Run)
+
+### 1) Siapkan lingkungan virtual & dependency
+```bash
+python -m venv .venv
+source .venv/bin/activate        # Windows: .venv\Scripts\activate
+pip install -r requirements.txt
+```
+
+### 2) Jalankan aplikasi
+```bash
+python main.py
+```
+Secara default akan membuka server Flask (cek log di terminal untuk host/port). Jika ada variabel environment khusus (mis. `HOST`, `PORT`), sesuaikan sebelum menjalankan.
+
+### 3) Struktur data & model
+- Pastikan `model/lcd_best.pt` tersedia (bobot CRNN).
+- File hasil pembacaan disimpan di `data/data.json` (otomatis dibuat/diperbarui).
+
+---
+
+## Cara Penggunaan
+
+### Upload Gambar Tunggal
+1. Buka halaman web (template `templates/index.html`).
+2. Unggah foto panel LCD/LED.
+3. Gunakan Cropper di UI untuk memilih area Setpoint & Air Temperature.
+4. Submit dan hasil pembacaan akan ditampilkan serta data disimpan ke `data/data.json`.
+
+### Live Camera
+1. Aktifkan kamera pada browser dengan memberi ijin.
+2. Lakukan crop manual pada area panel (Total 2 Panel).
+3. Klik tombol mulai capture gambar.
+4. Sistem akan mengambil foto berkala (±5 menit).
+5. Hasil akan diproses dengan model CRNN dan dikirim ke `data/data.json`.
+
+### List API
+- `POST /api/read-meter` — kirim gambar (atau crop) untuk inferensi, hasil disimpan ke `data/data.json`.
+- `GET /api/get-meter` — ambil riwayat (maks 100 data terbaru) untuk ditampilkan/diintegrasikan.
