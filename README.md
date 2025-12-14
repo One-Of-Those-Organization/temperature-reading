@@ -21,6 +21,7 @@ Dalam industri logistik *cold chain*, pemantauan suhu kontainer sangat krusial. 
 
 **Fitur Utama:**
 * **Single Image Upload:** Pengguna cukup mengunggah 1 foto panel utuh.
+* **Live Camera:** Pengguna dapat menggunakan kamera secara langsung dan otomatis mengambil foto setiap 5 menit.
 * **Smart Cropping:** Antarmuka web (Frontend) menggunakan `Cropper.js` untuk memotong area spesifik secara interaktif.
 * **Deep Learning Inference:** Backend menggunakan model PyTorch (`.pt`) yang dilatih khusus untuk membaca *7-segment display* pada panel LCD/LED.
 * **High Accuracy:** Model mampu mengenali karakter angka `0-9`, simbol minus `-`, dan titik `.` untuk membaca suhu negatif dan desimal.
@@ -43,7 +44,13 @@ Sebelum masuk ke model, potongan gambar (crop) diproses agar seragam:
 Sistem menggunakan arsitektur *hybrid* yang menggabungkan CNN dan RNN:
 * **CNN (Convolutional Neural Network):** Terdiri dari 3 blok konvolusi untuk mengekstrak fitur visual dari gambar (garis, lekukan).
 * **RNN (Bi-directional GRU):** Membaca urutan fitur dari kiri-ke-kanan dan kanan-ke-kiri untuk memahami konteks urutan karakter.
-* **CTC Loss (Connectionist Temporal Classification):** Layer output yang memungkinkan model memprediksi teks tanpa perlu memisahkan (segmentasi) setiap karakter secara manual.
+* **CTC Loss (Connectionist Temporal Classification):** Layer output yang memungkinkan model memprediksi teks tanpa perlu memisahkan (segmentasi) 
+
+### 3. Output / Result
+Setelah menganalisis dari hasil CRNN, data tersebut akan dikirimkan ke api/read-meter:
+* **Write Data:** Untuk dibaca dari hasil output menulis hasil ke data/data.json untuk menjadi sebuah laporan history
+* **Unique Data:** Dari data JSON tersebut akan memiliki pembeda antara upload file dengan live camera dengan pengambilan 100 data terbaru.
+* **Read Data**: Dari History data/data.json juga dapat diambil melalui api/get-meter untuk di implementasikan lebih bagus tampilannya.
 
 ---
 
@@ -53,6 +60,9 @@ Struktur direktori proyek ini adalah sebagai berikut:
 
 ```text
 temperature-reading/
+│
+│── data/
+│   └── data.json            # Keseluruhan History dari 100 data terbaru  
 │
 ├── model/
 │   └── lcd_best.pt          # File bobot model (Weight) hasil training PyTorch
