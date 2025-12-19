@@ -9,6 +9,66 @@ from torchvision import transforms
 from PIL import Image, ImageOps
 from flask import Flask, render_template, request, jsonify
 from datetime import datetime
+import paho.mqtt.client as mqtt
+
+# ==========================================
+# MQTT Stuff
+# ==========================================
+
+MQTT_BROKER = "test.mosquitto.org"
+MQTT_PORT = 1883
+MQTT_TOPIC = "ukdc/iot/temparature01"
+MQTT_KEEPALIVE = 60
+
+def on_connect(client, userdata, flags, reason_code, properties):
+    if reason_code == 0:
+        print(f"Connected to MQTT Broker:  {MQTT_BROKER}")
+        client.subscribe(MQTT_TOPIC)
+    else:
+        print(f"Failed to connect, return code {reason_code}")
+
+def on_message(client, userdata, msg):
+    """Called when a message is received from subscribed topic"""
+    # print(f"Received message on {msg.topic}: {msg.payload.decode()}")
+
+def on_publish(client, userdata, mid, reason_code, properties):
+    """Called when message is published"""
+    print(f"Message published (mid:  {mid})")
+
+def on_disconnect(client, userdata, disconnect_flags, reason_code, properties):
+    """Called when client disconnects"""
+    print(f"Disconnected from MQTT broker (code: {reason_code})")
+
+# Initialize MQTT Client
+mqttc = mqtt.Client(mqtt.CallbackAPIVersion.VERSION2)
+mqttc.on_connect = on_connect
+mqttc.on_message = on_message
+mqttc.on_publish = on_publish
+mqttc.on_disconnect = on_disconnect
+
+# Connect to MQTT Broker
+try:
+    print(f"Connecting to MQTT Broker:  {MQTT_BROKER}:{MQTT_PORT}")
+    mqttc.connect(MQTT_BROKER, MQTT_PORT, MQTT_KEEPALIVE)
+    mqttc.loop_start()
+    print("MQTT loop started")
+except Exception as e:
+    print(f"MQTT Connection Error: {e}")
+
+def publish_to_mqtt(data):
+    """Publish data to MQTT broker"""
+    try:
+        payload = json.dumps(data)
+        result = mqttc.publish(MQTT_TOPIC, payload, qos=1)
+        if result.rc == mqtt.MQTT_ERR_SUCCESS:
+            print(f"Data published to MQTT topic '{MQTT_TOPIC}'")
+            return True
+        else:
+            print(f"Failed to publish to MQTT:  {result.rc}")
+            return False
+    except Exception as e:
+        print(f"MQTT Publish Error: {e}")
+        return False
 
 # ==========================================
 # CRNN Setup
@@ -196,6 +256,8 @@ def read_meter():
             "source": source_type,
         }
 
+        mqtt_success = publish_to_mqtt(result_data)
+
         # Write to data/data.json
         data_pointer = "data/data.json"
         history_data = []
@@ -230,6 +292,8 @@ def read_meter():
             print(f"Data tersimpan: {result_data['timestamp']}")
         except Exception as e:
             print(f"Gagal tulis data: {e}")
+
+        result_data['mqtt_published'] = mqtt_success
 
         return jsonify({
             "status": 0,
