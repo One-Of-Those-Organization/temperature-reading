@@ -183,24 +183,39 @@
                 return;
             }
 
-            // Gambar video ke canvas
+            // Image from video to canvas
             canvas.width = video.videoWidth;
             canvas.height = video.videoHeight;
             canvas.getContext('2d').drawImage(video, 0, 0);
 
-            // Ambil data base64 untuk dimasukkan ke Cropper
+            // Take data from canvas
             const dataUrl = canvas.toDataURL('image/jpeg');
-            setupCropper(dataUrl);
+
+            // Setup cropper + auto crop jika koordinat lama ada
+            setupCropper(dataUrl, true);
         }
 
         // ==========================================================================
-        // ============================ CROPPER LOGIC ==============================
+        // ============================ CROPPER LOGIC ===============================
         // ==========================================================================
+        let originalFileBase64 = null;
+
         fileInput.addEventListener('change', function(e) {
             const file = e.target.files[0];
             if (file) {
                 const reader = new FileReader();
-                reader.onload = (evt) => setupCropper(evt.target.result);
+                reader.onload = (evt) => {
+                    originalFileBase64 = evt.target.result;
+
+                    // Uncomment this if want to reset crop data on new upload
+                    // cropData = {
+                    //     setpoint: null,
+                    //     airtemp: null
+                    // }
+
+                    // Initialize Cropper + auto crop dari koordinat lama jika ada
+                    setupCropper(originalFileBase64, true);
+                };
                 reader.readAsDataURL(file);
             } else {
                 alert("No file selected");
@@ -242,6 +257,11 @@
                 airtemp: null
             };
 
+            cropData = {
+                setpoint: null,
+                airtemp: null
+            };
+
             imageElement.src = '';
             imageElement.classList.add('hidden');
             document.getElementById('placeholder-text').classList.remove('hidden');
@@ -272,13 +292,11 @@
             btnProcess.innerHTML = "Lengkapi Setpoint & Air Temp";
         }
 
-        // Setup Cropper
-        function setupCropper(imageUrl) {
-            if (cropper) {
-                cropper.destroy();
-                cropper = null;
-            }
+        function setupCropper(imageUrl, applyOldCoords = false) {
+            // Hancurkan cropper lama jika ada
+            if (cropper) cropper.destroy();
 
+            // Set image dan tampilkan
             imageElement.src = imageUrl;
             imageElement.classList.remove('hidden');
             document.getElementById('placeholder-text').classList.add('hidden');
@@ -286,14 +304,60 @@
             document.getElementById('cropControls').classList.remove('hidden');
             document.getElementById('cropControls').classList.add('flex');
 
-            // Delay agar DOM siap
             setTimeout(() => {
                 cropper = new Cropper(imageElement, {
                     viewMode: 1,
                     autoCropArea: 0.6,
-                    background: false
+                    background: false,
+                    ready() {
+                        if (applyOldCoords) {
+                            // Auto crop from old coords if available
+                            ['setpoint', 'airtemp'].forEach(type => {
+                                const coords = cropCoords[type];
+                                if (!coords) return;
+
+                                // Don't overwrite if already cropped
+                                if (cropData[type]) return;
+
+                                const canvasCrop = cropper.getCroppedCanvas({
+                                    x: coords.x,
+                                    y: coords.y,
+                                    width: coords.width,
+                                    height: coords.height,
+                                    fillColor: '#fff'
+                                });
+
+                                cropData[type] = canvasCrop.toDataURL('image/jpeg', 0.9);
+
+                                const previewImg = document.getElementById(`preview-${type}`);
+                                const previewTxt = document.getElementById(`txt-${type}`);
+                                previewImg.src = cropData[type];
+                                previewImg.classList.remove('hidden');
+                                previewTxt.classList.add('hidden');
+                            });
+
+                            // If there are already both crops, lock the UI
+                            if (cropData.setpoint || cropData.airtemp) {
+                                lockCropUI();
+                                btnProcess.disabled = false;
+                                setupProcessButton();
+                            }
+                        }
+                    }
                 });
             }, 100);
+        }
+
+        function setupProcessButton() {
+            if (currentSource === 'camera') {
+                btnProcess.innerHTML = "MULAI AUTO CAPTURE (5 MENIT)";
+                btnProcess.onclick = startAutoCapture;
+                btnProcess.className = "w-full py-4 bg-purple-600 hover:bg-purple-700 text-white font-bold rounded-xl shadow-lg transition cursor-pointer";
+            } else { // mode upload
+                btnProcess.innerHTML = "PROSES DATA SEKARANG";
+                btnProcess.onclick = () => sendData(false);
+                btnProcess.className = "w-full py-4 bg-green-600 hover:bg-green-700 text-white font-bold rounded-xl shadow-lg transition cursor-pointer";
+            }
         }
 
         // Crop Image Function and Store Data
@@ -327,7 +391,7 @@
             console.log("cropImage Base64: ", cropData[type]);
 
             // 2. Save CROP COORDINATES
-            // Ini menyimpan: x, y, width, height from the cropper
+            // This saves x, y, width, height of the cropped area
             cropCoords[type] = cropper.getData();
 
             console.log("cropImage Coords: ", cropCoords[type]);
@@ -368,7 +432,7 @@
 
         // Auto Capture Logic
         function startAutoCapture() {
-            // Validate stream and crop coords
+            // Make sure camera is running and crop coords are set
             if (!stream || !cropCoords.setpoint || !cropCoords.airtemp) {
                 alert("Pastikan kamera nyala dan kedua area crop sudah ditentukan!");
                 return;
@@ -381,11 +445,10 @@
 
             console.log("Auto Capture dimulai...");
 
-            // Run First Time Immediately
+            // Run first process immediately
             processAutoFrame();
 
-            // Set Interval 5 Minutes
-            // Change to 300000 (5 menit) in production
+            // Set interval 5 menit (300000 ms)
             autoInterval = setInterval(processAutoFrame, 300000);
         }
 
@@ -396,43 +459,32 @@
                 autoInterval = null;
                 console.log("Auto Capture berhenti.");
             }
-            // Reset Tombol UI
-            if (currentSource === 'camera' && cropData.setpoint) {
-                btnProcess.innerHTML = "MULAI AUTO CAPTURE (5 MENIT)";
-                btnProcess.onclick = startAutoCapture;
-                btnProcess.className = "w-full py-4 bg-purple-600 hover:bg-purple-700 text-white font-bold rounded-xl shadow-lg transition cursor-pointer";
-            }
+            // Reset Button
+            if (currentSource === 'camera' && cropData.setpoint) setupProcessButton();
         }
 
         // Process Auto Frame from Video
         function processAutoFrame() {
             if(video.videoWidth === 0 || video.videoHeight === 0) return;
 
-            // 1. Take Snapshot from Video
             const tempCanvas = document.createElement('canvas');
             tempCanvas.width = video.videoWidth;
             tempCanvas.height = video.videoHeight;
             const ctx = tempCanvas.getContext('2d');
             ctx.drawImage(video, 0, 0);
 
-            // 2. Auto Crop based on saved coordinates
-            const spBase64 = cropFromCanvas(tempCanvas, cropCoords.setpoint);
-            const airBase64 = cropFromCanvas(tempCanvas, cropCoords.airtemp);
+            // Auto Crop based on saved coordinates
+            cropData.setpoint = cropFromCanvas(tempCanvas, cropCoords.setpoint);
+            cropData.airtemp = cropFromCanvas(tempCanvas, cropCoords.airtemp);
 
-            // Update cropData
-            cropData.setpoint = spBase64;
-            cropData.airtemp = airBase64;
+            // Update preview
+            document.getElementById('preview-setpoint').src = cropData.setpoint;
+            document.getElementById('preview-airtemp').src = cropData.airtemp;
 
-            // Update Previews
-            document.getElementById('preview-setpoint').src = spBase64;
-            document.getElementById('preview-airtemp').src = airBase64;
-
-            // Send to API
+            // Send Data to Server
             sendData(true);
 
-            // DEBUG
-            console.log("[AUTO FRAME] Using coords:", cropCoords);
-            console.log("[AUTO FRAME] Video size:", video.videoWidth, video.videoHeight);
+            console.log("[AUTO FRAME] coords:", cropCoords);
         }
 
         // Helper: Crop from Canvas based on coordinates
@@ -442,15 +494,11 @@
             destCanvas.height = coords.height;
             const ctx = destCanvas.getContext('2d');
 
-            // Draw cropped area (necessary to use drawImage with source and dest rects)
             ctx.drawImage(
                 sourceCanvas,
-                coords.x, coords.y, coords.width, coords.height, // Source Rect
-                0, 0, coords.width, coords.height // Dest Rect
+                coords.x, coords.y, coords.width, coords.height,
+                0, 0, coords.width, coords.height
             );
-
-            // DEBUG
-            console.log("[AUTO CROP] coords:", coords);
 
             return destCanvas.toDataURL('image/jpeg', 0.9);
         }
@@ -474,9 +522,7 @@
                 btnProcess.innerHTML = "Sedang Memproses...";
             }
 
-            const base64_image = imageElement.src;
-
-            if (!base64_image) {
+            if (originalFileBase64) {
                 alert("Image source is empty!");
                 return;
             }
@@ -486,15 +532,16 @@
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({
-                        "image": base64_image,
+                        "image": originalFileBase64,
                         "source": currentSource,
                     })
                 });
 
+                console.log("Fetch /api/process response:", response);
+
                 const json = await response.json();
 
                 if (json.status !== 0) {
-                    // Jika auto mode, jangan alert, cukup log
                     if(!isAuto) alert(json.statusText || "Gagal memproses data");
                     console.error("Process API Error:", json.statusText || json.message);
                     return;
@@ -544,7 +591,9 @@
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({
-                        image: imageElement.src,   // Base64 image
+                        image: originalFileBase64,                        // Base64 image
+                        setpoint_crop_image: cropData.setpoint,           // Base64 cropped setpoint
+                        airtemp_crop_image: cropData.airtemp,             // Base64 cropped airtemp
                         region: [cropCoords.setpoint, cropCoords.airtemp] // Array of crop coordinates
                     })
                 });
@@ -566,85 +615,58 @@
         // Load Config from Backend
         async function loadConfig() {
             try {
-                const response = await fetch('/api/get-coords');
+                const response = await fetch('/api/state');
                 const json = await response.json();
 
                 if (json.status !== 0) {
-                    console.warn("Gagal mengambil konfigurasi: " + (json.message || "Unknown error"));
+                    console.warn("Gagal mengambil konfigurasi:", json.message);
                     return;
                 }
 
-                const regions = json.data;
-                if (!regions || !regions.length) {
-                    console.warn("Konfigurasi tidak tersedia, silakan set crop manual.");
-                    return;
-                }
+                const regions = json.regions;
+                if (!regions || regions.length !== 2) return;
 
-                // Update cropCoords
                 cropCoords.setpoint = regions[0];
                 cropCoords.airtemp = regions[1];
 
-                // Gunakan preview image dari backend jika ada
-                const previewImage = regions[0].preview || regions[1].preview;
-                if (previewImage) {
-                    imageElement.src = previewImage;
+                if (json.crop_setpoint) cropData.setpoint = json.crop_setpoint;
+                if (json.crop_airtemp) cropData.airtemp = json.crop_airtemp;
+
+                if (cropData.setpoint) {
+                    const previewSetpoint = document.getElementById('preview-setpoint');
+                    previewSetpoint.src = cropData.setpoint;
+                    previewSetpoint.classList.remove('hidden');
+                    document.getElementById('txt-setpoint').classList.add('hidden');
+                }
+
+                if (cropData.airtemp) {
+                    const previewAir = document.getElementById('preview-airtemp');
+                    previewAir.src = cropData.airtemp;
+                    previewAir.classList.remove('hidden');
+                    document.getElementById('txt-airtemp').classList.add('hidden');
+                }
+
+                if (json.image) {
+                    imageElement.src = `data:image/jpeg;base64,${json.image}`;
                     imageElement.classList.remove('hidden');
                     document.getElementById('placeholder-text').classList.add('hidden');
 
-                    // Tunggu image benar-benar load
-                    imageElement.onload = () => {
-                        // Destroy cropper lama kalau ada
-                        if (cropper) cropper.destroy();
+                    if (cropper) cropper.destroy();
 
-                        cropper = new Cropper(imageElement, {
-                            viewMode: 1,
-                            autoCropArea: 0.6,
-                            background: false
-                        });
-
-                        // Tunggu cropper siap sebelum ambil canvas
-                        cropper.ready(() => {
-                            // Set data dan ambil preview Setpoint
-                            if (cropCoords.setpoint) {
-                                cropper.setData(cropCoords.setpoint);
-                                const spCanvas = cropper.getCroppedCanvas({
-                                    width: cropCoords.setpoint.width,
-                                    height: cropCoords.setpoint.height
-                                });
-                                cropData.setpoint = spCanvas.toDataURL('image/jpeg', 0.9);
-                                const spPreview = document.getElementById('preview-setpoint');
-                                spPreview.src = cropData.setpoint;
-                                spPreview.classList.remove('hidden');
-                                document.getElementById('txt-setpoint').classList.add('hidden');
-                            }
-
-                            // Set data dan ambil preview Air Temp
-                            if (cropCoords.airtemp) {
-                                cropper.setData(cropCoords.airtemp);
-                                const airCanvas = cropper.getCroppedCanvas({
-                                    x: cropCoords.airtemp.x,
-                                    y: cropCoords.airtemp.y,
-                                    width: cropCoords.airtemp.width,
-                                    height: cropCoords.airtemp.height
-                                });
-                                cropData.airtemp = airCanvas.toDataURL('image/jpeg', 0.9);
-                                const airPreview = document.getElementById('preview-airtemp');
-                                airPreview.src = cropData.airtemp;
-                                airPreview.classList.remove('hidden');
-                                document.getElementById('txt-airtemp').classList.add('hidden');
-                            }
-
-                            // Unlock process button
+                    cropper = new Cropper(imageElement, {
+                        viewMode: 1,
+                        autoCropArea: 0.6,
+                        background: false,
+                        ready() {
                             btnProcess.disabled = false;
                             btnProcess.innerHTML = "PROSES DATA SEKARANG";
-                            btnProcess.className = "w-full py-4 bg-green-600 hover:bg-green-700 text-white font-bold rounded-xl shadow-lg transition cursor-pointer";
                             btnProcess.onclick = () => sendData(false);
-                        });
-                    };
+                        }
+                    });
                 }
 
             } catch (err) {
-                console.error(err);
+                console.error("Load config error:", err);
             }
         }
 
