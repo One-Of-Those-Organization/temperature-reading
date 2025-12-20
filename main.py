@@ -334,9 +334,15 @@ def process_image():
         img_w, img_h = img.size
         results = []
 
-        for idx, r in enumerate(LAST_REGIONS):
-            x, y, w, h = normalize_region(r, img_w, img_h)
+        i = 0
+        for r in LAST_REGIONS:
+            i += 1
+            x = r["x"]
+            y = r["y"]
+            w = r["w"]
+            h = r["h"]
             crop = img.crop((x, y, x + w, y + h))
+            # crop.save(f'./cropped-{i}.png') # debuggin
 
             buf = io.BytesIO()
             crop.save(buf, format="PNG")
