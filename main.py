@@ -7,6 +7,9 @@ import torch
 import torch.nn as nn
 from torchvision import transforms
 from PIL import Image, ImageOps
+
+# Image.MAX_IMAGE_PIXELS = None
+
 from flask import Flask, render_template, request, jsonify
 from datetime import datetime
 import paho.mqtt.client as mqtt
@@ -20,6 +23,45 @@ MQTT_PORT = 1883
 MQTT_TOPIC = "ukdc/iot/temparature01"
 MQTT_KEEPALIVE = 60
 
+# Normalize Region Function {x, y, width, height}
+def normalize_region(r, img_w, img_h):
+    x = int(round(r.get("x", 0)))
+    y = int(round(r.get("y", 0)))
+    w = int(round(r.get("width", 0)))
+    h = int(round(r.get("height", 0)))
+
+    x = max(0, min(x, img_w - 1))
+    y = max(0, min(y, img_h - 1))
+    w = max(1, min(w, img_w - x))
+    h = max(1, min(h, img_h - y))
+
+    return x, y, w, h
+
+LAST_IMAGE_B64 = None
+LAST_REGIONS = []
+STATE_FILE = "data/state.json"
+
+# Load previous state if exists
+if os.path.exists(STATE_FILE):
+    try:
+        with open(STATE_FILE, "r") as f:
+            state = json.load(f)
+            LAST_IMAGE_B64 = state.get("image")
+            LAST_REGIONS = state.get("regions", [])
+            print("State loaded")
+    except:
+        print("State rusak, abaikan")
+
+# Save state function
+def save_state():
+    os.makedirs(os.path.dirname(STATE_FILE), exist_ok=True)
+    with open(STATE_FILE, "w") as f:
+        json.dump({
+            "image": LAST_IMAGE_B64,
+            "regions": LAST_REGIONS
+        }, f, indent=4)
+
+# MQTT Callbacks
 def on_connect(client, userdata, flags, reason_code, properties):
     if reason_code == 0:
         print(f"Connected to MQTT Broker:  {MQTT_BROKER}")
@@ -201,39 +243,39 @@ def save_state():
 app = Flask(__name__)
 data = "data/data.json"
 
-# Konfigurasi Device & Model Path
+# Configure Model (GPU or CPU)
 DEVICE = "cuda" if torch.cuda.is_available() else "cpu" # EARLY WARNING : CHANGE this to DEVICE = "cpu" if you have some trouble with cuda
 MODEL_PATH = "model/lcd_best.pt"
 model = None # Fallback if Model path not found
 
-# Load Model saat aplikasi dijalankan
+# Load Model when starting the server
 try:
-    print(f"Memuat model dari {MODEL_PATH} ke {DEVICE}...")
+    print(f"Load model from {MODEL_PATH} to {DEVICE}...")
     checkpoint = torch.load(MODEL_PATH, map_location=DEVICE)
 
-    # Inisialisasi model
+    # Initialize Model
     model = CRNN(NUM_CLASSES).to(DEVICE)
 
-    # Load state dict (bobot)
-    # Menangani kemungkinan key 'model' atau langsung state_dict
+    # Load State Dict
+    # Handle if checkpoint is a dict with 'model' key or direct state_dict
     if isinstance(checkpoint, dict) and "model" in checkpoint:
         model.load_state_dict(checkpoint["model"])
     else:
         model.load_state_dict(checkpoint)
 
-    model.eval()  # Set ke mode evaluasi (bukan training)
+    model.eval()  # Set model to evaluation mode
     print("Model berhasil dimuat!")
 except Exception as e:
     print(f"ERROR MEMUAT MODEL: {e}")
     print("Pastikan file 'lcd_best.pt' ada di folder yang sama.")
 
 def predict_image(image_bytes):
-    """Fungsi helper untuk memprediksi satu gambar bytes"""
+    """Helper function to predict text from image bytes"""
     try:
-        # Buka gambar dari bytes
+        # Open Image from Bytes
         img = Image.open(io.BytesIO(image_bytes)).convert("RGB")
 
-        # Transformasi gambar ke Tensor
+        # Transform Image to Tensor
         img_tensor = transform_pipeline(img).unsqueeze(0).to(DEVICE)
 
         # Inference
@@ -247,8 +289,9 @@ def predict_image(image_bytes):
         return "Error"
 
 # ==========================================
-# 3. ROUTE API & HALAMAN
+# ROUTE DEFINITIONS
 # ==========================================
+# Homepage Route
 @app.route('/')
 def index():
     return render_template('index.html')
@@ -368,21 +411,21 @@ def process_image():
     except Exception as e:
         return jsonify({"status": 9, "message": str(e)}), 500
 
-
-
+# API Endpoint for reading meter (but not using this one for now) replaced by /api/process
 @app.route('/api/read-meter', methods=['POST'])
 def read_meter():
-    # Cek Model
+    # Check if model is loaded
     if model is None:
         return jsonify({
             "status": 1,
-            "message": "Model belum dimuat"
+            "message": "Model not loaded"
         }), 500
 
     try:
+        # Get JSON Payload
         data = request.get_json()
 
-        # Ambil Data
+        # Set Base64 Image
         setpoint_b64 = data.get('setpoint_image', '')
         air_temp_b64 = data.get('air_temp_image', '')
         source_type = data.get('source', 'camera')
@@ -390,21 +433,22 @@ def read_meter():
         if not setpoint_b64 or not air_temp_b64:
             return jsonify({
                 "status": 2,
-                "message": "Gambar kurang!"
+                "message": "Missing image setpoint or air temperature"
             }), 400
 
         # Decode Base64
         if "," in setpoint_b64: setpoint_b64 = setpoint_b64.split(",")[1]
         if "," in air_temp_b64: air_temp_b64 = air_temp_b64.split(",")[1]
 
+        # Decode Base64 to Bytes
         sp_bytes = base64.b64decode(setpoint_b64)
         air_bytes = base64.b64decode(air_temp_b64)
 
-        # Prediksi CRNN
+        # Predict Images with CRNN
         setpoint_result = predict_image(sp_bytes)
         air_temp_result = predict_image(air_bytes)
 
-        # Buat Object Data Baru
+        # Create New Result Data Dictionary
         result_data = {
             "setpoint_code": setpoint_result,
             "air_temperature": air_temp_result,
@@ -412,6 +456,7 @@ def read_meter():
             "source": source_type,
         }
 
+        # Publish to MQTT
         mqtt_success = publish_to_mqtt(result_data)
 
         # Write to data/data.json
@@ -424,7 +469,7 @@ def read_meter():
                 with open(data_pointer, "r") as f:
                     file_content = json.load(f)
 
-                    # Pastikan formatnya List
+                    # Make sure it's a list
                     if isinstance(file_content, list):
                         history_data = file_content
                     else:
@@ -451,6 +496,7 @@ def read_meter():
 
         result_data['mqtt_published'] = mqtt_success
 
+        # Return Success Response
         return jsonify({
             "status": 0,
             "message": "Send Data",
@@ -462,18 +508,215 @@ def read_meter():
         print(traceback.format_exc())
         return jsonify({"status": 4, "message": str(e)}), 500
 
+# API Endpoint for setting configuration
+@app.route('/api/config', methods=['POST'])
+def set_config():
+    try:
+        # Get JSON Payload
+        payload = request.get_json()
+
+        # Set Base64 Image and Regions
+        image_b64 = payload.get('image')
+        regions = payload.get('region')
+
+        # Validate Input
+        if not image_b64 or not regions or len(regions) != 2:
+            return jsonify({
+                "status": 3,
+                "message": "Invalid config"
+            }), 400
+
+        # Decode Base64 Image
+        if "," in image_b64:
+            image_b64 = image_b64.split(",")[1]
+
+        # Load Image to get dimensions
+        image_bytes = base64.b64decode(image_b64)
+        img = Image.open(io.BytesIO(image_bytes)).convert("RGB")
+
+        # Get Image Dimensions
+        img_w, img_h = img.size
+        normalized = []
+
+        # Set Normalized Regions
+        for r in regions:
+            x, y, w, h = normalize_region(r, img_w, img_h)
+            normalized.append({"x": x, "y": y, "w": w, "h": h})
+
+        # Update Global State
+        global LAST_IMAGE_B64, LAST_REGIONS
+        LAST_IMAGE_B64 = image_b64
+        LAST_REGIONS = normalized
+        save_state()
+
+        # Return Success Response
+        return jsonify({
+            "status": 0,
+            "message": "Configuration saved",
+            "regions": normalized
+        })
+
+    except Exception as e:
+        return jsonify({
+            "status": 4,
+            "message": f"Server Error: {str(e)}"
+        }), 500
+
+# API Endpoint for processing image
+@app.route('/api/process', methods=['POST'])
+def process_image():
+    # Make sure model is loaded
+    if model is None:
+        return jsonify({
+            "status": 5,
+            "message": "Model not loaded"
+        }), 500
+
+    # If doesn't have configuration yet then return error
+    if not LAST_REGIONS:
+        return jsonify({
+            "status": 6,
+            "message": "No configuration set"
+        }), 400
+
+    # Process Image
+    try:
+        payload = request.get_json()
+        image_b64 = payload.get('image')
+        source = payload.get('source', 'unknown')
+
+        if not image_b64:
+            return jsonify({
+                "status": 7,
+                "message": "Image missing"
+            }), 400
+
+        if "," in image_b64:
+            image_b64 = image_b64.split(",")[1]
+
+        img_bytes = base64.b64decode(image_b64)
+        img = Image.open(io.BytesIO(img_bytes)).convert("RGB")
+
+        img_w, img_h = img.size
+        results = []
+
+        for r in LAST_REGIONS:
+            x, y, w, h = normalize_region(r, img_w, img_h)
+            crop = img.crop((x, y, x + w, y + h))
+
+            buf = io.BytesIO()
+            crop.save(buf, format="PNG")
+            text = predict_image(buf.getvalue())
+            results.append(text)
+
+        # Create Result Data
+        result_data = {
+            "setpoint_code": results[0],
+            "air_temperature": results[1],
+            "source": source,
+            "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        }
+
+        # Publish to MQTT
+        mqtt_success = publish_to_mqtt(result_data)
+        result_data["mqtt_published"] = mqtt_success
+
+        # ================================
+        # Write to data/data.json (keep history)
+        # ================================
+        data_pointer = "data/data.json"
+        history_data = []
+
+        # Load previous history if exists
+        if os.path.exists(data_pointer):
+            try:
+                with open(data_pointer, "r", encoding="utf-8") as f:
+                    file_content = json.load(f)
+                    # Make sure it is a list
+                    if isinstance(file_content, list):
+                        history_data = file_content
+                    else:
+                        history_data = [file_content]
+            except Exception as e:
+                print(f"Warning: old file broken/empty, creating new. Error: {e}")
+                history_data = []
+
+        # Insert new result at the front
+        history_data.insert(0, result_data)
+
+        # Limit max 100 records
+        history_data = history_data[:100]
+
+        # Write back to file
+        try:
+            os.makedirs(os.path.dirname(data_pointer), exist_ok=True)
+            with open(data_pointer, "w", encoding="utf-8") as f:
+                json.dump(history_data, f, ensure_ascii=False, indent=4)
+        except Exception as e_write:
+            print("Failed to write data.json:", e_write)
+
+        # Return Response
+        return jsonify({
+            "status": 0,
+            "data": result_data
+        })
+
+    except Exception as e:
+        return jsonify({
+            "status": 8,
+            "message": str(e)
+        }), 500
+
+# API Endpoint for getting coordinates
+@app.route('/api/get-coords', methods=['GET'])
+def get_coords():
+    data_path = "data/state.json"
+
+    if not os.path.exists(data_path):
+        return jsonify({
+            "status": 9,
+            "message": "No crop configuration found",
+            "data": None
+        }), 404
+
+    try:
+        with open(data_path, "r") as f:
+            data = json.load(f)
+
+        # Validate regions
+        if "regions" not in data:
+            return jsonify({
+                "status": 10,
+                "message": "Invalid config file",
+                "data": None
+            }), 400
+
+        return jsonify({
+            "status": 0,
+            "message": "Crop config loaded",
+            "data": data["regions"]
+        })
+
+    except Exception as e:
+        return jsonify({
+            "status": 11,
+            "message": f"Server error: {str(e)}",
+            "data": None
+        }), 500
+
+# API Endpoint to get meter data
 @app.route('/api/get-meter', methods=['GET'])
 def get_meter():
     data_path = "data/data.json"
 
-    # Check if data is existed
+    # If data not existed -> Create new
     if not os.path.exists(data_path):
         return jsonify({
-            "status": 5,
+            "status": 12,
             "message": "Data tidak ditemukan pada Server !"
-        })
+        }), 400
 
-    # If data existed
+    # If data existed -> Load and send
     try:
         with open(data_path, "r") as f:
             data = json.load(f)
@@ -483,14 +726,15 @@ def get_meter():
             "message": "Send Data",
             "data": data
         })
+
     except Exception as e:
         return jsonify({
-            "status": 6,
+            "status": 13,
             "message": f"Server Error: {str(e)}",
-            "data": "Tanya Fufufafa"
-        })
+            "data": "There is an error reading the data file."
+        }), 500
 
 if __name__ == '__main__':
-    # Jalankan server di port 5000 atau ganti port lainnya
+    # Run Flask App in 5000 port wiht debug mode
     print("Server berjalan di http://localhost:5000")
     app.run(host='0.0.0.0', port=5000, debug=True)

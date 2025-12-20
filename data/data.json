@@ -1,5 +1,26 @@
 [
     {
+        "setpoint_code": "-.0",
+        "air_temperature": "-.0",
+        "source": "upload",
+        "timestamp": "2025-12-20 19:32:03",
+        "mqtt_published": true
+    },
+    {
+        "setpoint_code": "-.0",
+        "air_temperature": "-.0",
+        "source": "upload",
+        "timestamp": "2025-12-20 19:29:18",
+        "mqtt_published": true
+    },
+    {
+        "setpoint_code": "-.0",
+        "air_temperature": "-.0",
+        "source": "upload",
+        "timestamp": "2025-12-20 19:09:21",
+        "mqtt_published": true
+    },
+    {
         "setpoint_code": "-25.",
         "air_temperature": "-10.0.",
         "timestamp": "2025-12-13 23:42:41",
