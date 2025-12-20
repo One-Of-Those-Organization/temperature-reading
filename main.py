@@ -7,6 +7,9 @@ import torch
 import torch.nn as nn
 from torchvision import transforms
 from PIL import Image, ImageOps
+
+# Image.MAX_IMAGE_PIXELS = None
+
 from flask import Flask, render_template, request, jsonify
 from datetime import datetime
 import paho.mqtt.client as mqtt
@@ -463,7 +466,41 @@ def process_image():
         mqtt_success = publish_to_mqtt(result_data)
         result_data["mqtt_published"] = mqtt_success
 
-        # Write to data/data.json
+        # ================================
+        # Write to data/data.json (keep history)
+        # ================================
+        data_pointer = "data/data.json"
+        history_data = []
+
+        # Load previous history if exists
+        if os.path.exists(data_pointer):
+            try:
+                with open(data_pointer, "r", encoding="utf-8") as f:
+                    file_content = json.load(f)
+                    # Make sure it is a list
+                    if isinstance(file_content, list):
+                        history_data = file_content
+                    else:
+                        history_data = [file_content]
+            except Exception as e:
+                print(f"Warning: old file broken/empty, creating new. Error: {e}")
+                history_data = []
+
+        # Insert new result at the front
+        history_data.insert(0, result_data)
+
+        # Limit max 100 records
+        history_data = history_data[:100]
+
+        # Write back to file
+        try:
+            os.makedirs(os.path.dirname(data_pointer), exist_ok=True)
+            with open(data_pointer, "w", encoding="utf-8") as f:
+                json.dump(history_data, f, ensure_ascii=False, indent=4)
+        except Exception as e_write:
+            print("Failed to write data.json:", e_write)
+
+        # Return Response
         return jsonify({
             "status": 0,
             "data": result_data
@@ -475,7 +512,44 @@ def process_image():
             "message": str(e)
         }), 500
 
-# API Endpoint untuk mendapatkan data meter
+# API Endpoint for getting coordinates
+@app.route('/api/get-coords', methods=['GET'])
+def get_coords():
+    data_path = "data/state.json"
+
+    if not os.path.exists(data_path):
+        return jsonify({
+            "status": 9,
+            "message": "No crop configuration found",
+            "data": None
+        }), 404
+
+    try:
+        with open(data_path, "r") as f:
+            data = json.load(f)
+
+        # Validate regions
+        if "regions" not in data:
+            return jsonify({
+                "status": 10,
+                "message": "Invalid config file",
+                "data": None
+            }), 400
+
+        return jsonify({
+            "status": 0,
+            "message": "Crop config loaded",
+            "data": data["regions"]
+        })
+
+    except Exception as e:
+        return jsonify({
+            "status": 11,
+            "message": f"Server error: {str(e)}",
+            "data": None
+        }), 500
+
+# API Endpoint to get meter data
 @app.route('/api/get-meter', methods=['GET'])
 def get_meter():
     data_path = "data/data.json"
@@ -483,9 +557,9 @@ def get_meter():
     # If data not existed -> Create new
     if not os.path.exists(data_path):
         return jsonify({
-            "status": 9,
+            "status": 12,
             "message": "Data tidak ditemukan pada Server !"
-        })
+        }), 400
 
     # If data existed -> Load and send
     try:
@@ -497,12 +571,13 @@ def get_meter():
             "message": "Send Data",
             "data": data
         })
+
     except Exception as e:
         return jsonify({
-            "status": 10,
+            "status": 13,
             "message": f"Server Error: {str(e)}",
             "data": "There is an error reading the data file."
-        })
+        }), 500
 
 if __name__ == '__main__':
     # Run Flask App in 5000 port wiht debug mode
