@@ -201,7 +201,7 @@
             if (file) {
                 const reader = new FileReader();
                 reader.onload = (evt) => {
-                    setupCropper(evt.target.result);
+                    setupCropper(evt.target.result, cropCoords);
                 };
                 reader.readAsDataURL(file);
             } else {
@@ -218,7 +218,7 @@
 
             imageElement.src = imageUrl;
             imageElement.classList.remove('hidden');
-            document.getElementById('placeholder-text').classList.add('hidder');
+            document.getElementById('placeholder-text').classList.add('hidden');
             document.querySelector('#cropType button').classList.remove('hidden');
             document.getElementById('cropControls').classList.remove('hidden');
             document.getElementById('cropControls').classList.add('flex');
@@ -292,7 +292,7 @@
         }
 
         // Reset Cropper UI
-        function resetCropper() {
+        function resetCropper(keepCoords = false) {
             if (cropper) {
                 cropper.destroy();
                 cropper = null;
@@ -306,7 +306,7 @@
 
             // Reset Crop Coords
             if (!keepCoords) {
-                    cropCoords = {
+                cropCoords = {
                         setpoint: null,
                         airtemp: null
                 };
