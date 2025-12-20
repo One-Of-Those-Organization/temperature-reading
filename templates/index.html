@@ -52,6 +52,19 @@
             <div id="placeholder-text" class="absolute text-gray-400">Preview gambar akan muncul di sini</div>
         </div>
 
+        <div id="cropType" class="w-full mb-4">
+            <button
+                    onclick="resetCropper()"
+                    class="hidden w-full flex items-center justify-center gap-2 px-4 py-2
+               text-sm font-semibold text-red-600
+               bg-red-50 border border-red-200
+               hover:bg-red-100 hover:border-red-300
+               transition shadow-sm"
+            >
+                🔄 Set Ulang Area Crop
+            </button>
+        </div>
+
         <div id="cropControls" class="hidden flex justify-center gap-4 mb-6">
             <button onclick="cropImage('setpoint')" class="bg-indigo-600 hover:bg-indigo-700 text-white font-medium py-2 px-4 rounded shadow">
                 1. Ambil Setpoint
@@ -110,12 +123,15 @@
             airtemp: null
         };
 
+        // DEBUG LOG
+        console.log("Current Crop Data:", cropData);
+        console.log("Current Crop Coords:", cropCoords);
+
         // --- DOM ELEMENTS ---
         const imageElement = document.getElementById('imageSource');
         const fileInput = document.getElementById('fileInput');
         const video = document.getElementById('videoElement');
         const canvas = document.getElementById('canvasElement');
-        // FIX: Definisikan tombol proses
         const btnProcess = document.getElementById('btnProcess');
 
         // --- TAB CONTROL ---
@@ -137,13 +153,15 @@
             else stopCamera();
         }
 
-        // --- KAMERA LOGIC ---
+        // ==========================================================================
+        // ============================== CAMERA LOGIC ==============================
+        // ==========================================================================
         async function startCamera() {
             try {
                 stream = await navigator.mediaDevices.getUserMedia({ video: true });
                 video.srcObject = stream;
             } catch (err) {
-                alert("Gagal akses kamera: " + err);
+                alert("Failed to Access Camera: " + err);
             }
         }
 
@@ -154,9 +172,13 @@
             }
         }
 
+        // ==========================================================================
+        // ============================ SNAPSHOT LOGIC ==============================
+        // ==========================================================================
+
         function takeSnapshot() {
             if (!stream) {
-                alert("Kamera belum aktif!");
+                alert("Camera not started yet!");
                 return;
             }
 
@@ -170,15 +192,32 @@
             setupCropper(dataUrl);
         }
 
-        // --- UPLOAD FILE ---
+        // ==========================================================================
+        // ============================ CROPPER LOGIC ==============================
+        // ==========================================================================
         fileInput.addEventListener('change', function(e) {
             const file = e.target.files[0];
             if (file) {
                 const reader = new FileReader();
                 reader.onload = (evt) => setupCropper(evt.target.result);
                 reader.readAsDataURL(file);
+            } else {
+                alert("No file selected");
             }
         });
+
+        function resetCropper() {
+            if (cropper) {
+                cropper.destroy();
+                cropper = null;
+            }
+            imageElement.src = '';
+            imageElement.classList.add('hidden');
+            document.getElementById('placeholder-text').classList.remove('hidden');
+            document.getElementById('cropType').classList.add('hidden');
+            document.getElementById('cropControls').classList.add('hidden');
+            document.getElementById('cropControls').classList.remove('flex');
+        }
 
         // --- CROPPER SETUP ---
         function setupCropper(imageUrl) {
@@ -190,6 +229,7 @@
             imageElement.src = imageUrl;
             imageElement.classList.remove('hidden');
             document.getElementById('placeholder-text').classList.add('hidden');
+            document.getElementById('cropType').classList.remove('hidden');
             document.getElementById('cropControls').classList.remove('hidden');
             document.getElementById('cropControls').classList.add('flex');
 
@@ -206,7 +246,7 @@
         // --- CROP & SAVE COORDS ---
         function cropImage(type) {
             if (!cropper) {
-                alert("Silakan ambil gambar terlebih dahulu!");
+                alert("Please load an image first.");
                 return;
             }
 
@@ -214,6 +254,8 @@
                 maxWidth: 800,
                 fillColor: '#fff'
             });
+
+            console.log("cropImage Data: ", canvasCrop);
 
             if (!canvasCrop) {
                 alert("Gagal melakukan crop.");
@@ -223,9 +265,17 @@
             // 1. Simpan Gambar Base64 (Untuk Preview)
             cropData[type] = canvasCrop.toDataURL('image/jpeg', 0.9);
 
+            console.log("cropImage Base64: ", cropData[type]);
+
             // 2. Simpan KOORDINAT (Penting untuk Auto Capture nanti)
             // Ini menyimpan: x, y, width, height dari kotak crop
             cropCoords[type] = cropper.getData();
+
+            // Initialize Previous Crop Data from Local Storage
+            localStorage.setItem(type === 'setpoint' ? "cropDataLeftPanel" : "cropDataRightPanel", JSON.stringify(cropCoords[type]));
+            console.log("Stored cropData in LocalStorage for type:", type);
+
+            console.log("cropImage Coords: ", cropCoords[type]);
 
             // 3. Update UI Preview
             const previewImg = document.getElementById(`preview-${type}`);
@@ -236,6 +286,10 @@
 
             checkReady();
         }
+
+        // ==========================================================================
+        // ========================= PROCESS BUTTON LOGIC ===========================
+        // ==========================================================================
 
         function checkReady() {
             if (cropData.setpoint && cropData.airtemp) {
@@ -316,6 +370,10 @@
 
             // 4. Kirim ke Backend (Mode Silent/Auto)
             sendData(true);
+
+            // DEBUG
+            console.log("[AUTO FRAME] Using coords:", cropCoords);
+            console.log("[AUTO FRAME] Video size:", video.videoWidth, video.videoHeight);
         }
 
         // Helper: Memotong canvas berdasarkan koordinat x,y,w,h
@@ -331,6 +389,9 @@
                 coords.x, coords.y, coords.width, coords.height, // Source Rect
                 0, 0, coords.width, coords.height // Dest Rect
             );
+
+            // DEBUG
+            console.log("[AUTO CROP] coords:", coords);
 
             return destCanvas.toDataURL('image/jpeg', 0.9);
         }
@@ -393,6 +454,11 @@
                 }
             }
         }
+
+        // // Initialize Previous Crop Data from Local Storage
+        // localStorage.setItem("cropDataLeftPanel", JSON.stringify(cropCoords.setpoint));
+        // localStorage.setItem("cropDataRightPanel", JSON.stringify(cropCoords.airtemp));
+        // // console.log("cropImage Coords: ", cropCoords[type]);
     </script>
 </body>
 </html>

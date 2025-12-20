@@ -213,7 +213,7 @@ def predict_image(image_bytes):
 def index():
     return render_template('index.html')
 
-
+# API Endpoint untuk membaca meter
 @app.route('/api/read-meter', methods=['POST'])
 def read_meter():
     # Cek Model
@@ -234,7 +234,7 @@ def read_meter():
         if not setpoint_b64 or not air_temp_b64:
             return jsonify({
                 "status": 2,
-                "message": "Gambar kurang!"
+                "message": "Gambar Setpoint atau Air Temperature tidak ditemukan"
             }), 400
 
         # Decode Base64
@@ -306,6 +306,7 @@ def read_meter():
         print(traceback.format_exc())
         return jsonify({"status": 4, "message": str(e)}), 500
 
+# API Endpoint untuk mendapatkan data meter
 @app.route('/api/get-meter', methods=['GET'])
 def get_meter():
     data_path = "data/data.json"
@@ -331,7 +332,7 @@ def get_meter():
         return jsonify({
             "status": 6,
             "message": f"Server Error: {str(e)}",
-            "data": "Tanya Fufufafa"
+            "data": ""
         })
 
 if __name__ == '__main__':
