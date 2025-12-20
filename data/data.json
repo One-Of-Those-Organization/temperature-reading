@@ -1,23 +1,16 @@
 [
     {
-        "setpoint_code": "-.0",
-        "air_temperature": "-.0",
+        "setpoint_code": "-20.0",
+        "air_temperature": "-9.2",
         "source": "upload",
-        "timestamp": "2025-12-20 19:32:03",
+        "timestamp": "2025-12-20 21:51:20",
         "mqtt_published": true
     },
     {
-        "setpoint_code": "-.0",
-        "air_temperature": "-.0",
+        "setpoint_code": "-20.0",
+        "air_temperature": "-9.2",
         "source": "upload",
-        "timestamp": "2025-12-20 19:29:18",
-        "mqtt_published": true
-    },
-    {
-        "setpoint_code": "-.0",
-        "air_temperature": "-.0",
-        "source": "upload",
-        "timestamp": "2025-12-20 19:09:21",
+        "timestamp": "2025-12-20 21:28:29",
         "mqtt_published": true
     },
     {
