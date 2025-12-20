@@ -190,7 +190,7 @@
 
             // Ambil data base64 untuk dimasukkan ke Cropper
             const dataUrl = canvas.toDataURL('image/jpeg');
-            setupCropper(dataUrl);
+            setupCropper(dataUrl, cropCoords);
         }
 
         // ==========================================================================
@@ -200,12 +200,80 @@
             const file = e.target.files[0];
             if (file) {
                 const reader = new FileReader();
-                reader.onload = (evt) => setupCropper(evt.target.result);
+                reader.onload = (evt) => {
+                    setupCropper(evt.target.result);
+                };
                 reader.readAsDataURL(file);
             } else {
                 alert("No file selected");
             }
         });
+
+
+        function setupCropper(imageUrl, savedCoords = null) {
+            if (cropper) {
+                cropper.destroy();
+                cropper = null;
+            }
+
+            imageElement.src = imageUrl;
+            imageElement.classList.remove('hidden');
+            document.getElementById('placeholder-text').classList.add('hidder');
+            document.querySelector('#cropType button').classList.remove('hidden');
+            document.getElementById('cropControls').classList.remove('hidden');
+            document.getElementById('cropControls').classList.add('flex');
+
+            setTimeout(() => {
+                cropper = new Cropper(imageElement, {
+                    viewMode: 1,
+                    autoCropArea: 0.6,
+                    background: false,
+                    ready() {
+                        if (savedCoords && savedCoords.setpoint && savedCoords.airtemp) {
+                            console.log("Restoring saved crop:", savedCoords);
+                            cropper.setData(savedCoords.setpoint);
+                            updatePreviewsFromSavedCoords(savedCoords);
+                            lockCropUI();
+                            checkReady();
+                        }
+                    }
+                });
+            }, 100);
+        }
+
+        function updatePreviewsFromSavedCoords(coords) {
+            if (!cropper) return;
+            
+            // Update Setpoint Preview
+            if (coords.setpoint) {
+                cropper.setData(coords.setpoint);
+                const spCanvas = cropper.getCroppedCanvas({
+                    maxWidth: 800,
+                    fillColor: '#fff'
+                });
+                if (spCanvas) {
+                    cropData.setpoint = spCanvas. toDataURL('image/jpeg', 0.9);
+                    document.getElementById('preview-setpoint').src = cropData.setpoint;
+                    document.getElementById('preview-setpoint').classList.remove('hidden');
+                    document.getElementById('txt-setpoint').classList.add('hidden');
+                }
+            }
+            
+            // Update Air Temp Preview
+            if (coords.airtemp) {
+                cropper.setData(coords.airtemp);
+                const airCanvas = cropper.getCroppedCanvas({
+                    maxWidth: 800,
+                    fillColor: '#fff'
+                });
+                if (airCanvas) {
+                    cropData.airtemp = airCanvas.toDataURL('image/jpeg', 0.9);
+                    document.getElementById('preview-airtemp').src = cropData.airtemp;
+                    document.getElementById('preview-airtemp').classList.remove('hidden');
+                    document.getElementById('txt-airtemp').classList.add('hidden');
+                }
+            }
+        }
 
         // Lock Crop UI after both crops are set
         function lockCropUI(){
@@ -237,10 +305,13 @@
             fileInput.value = '';
 
             // Reset Crop Coords
-            cropCoords = {
-                setpoint: null,
-                airtemp: null
-            };
+            if (!keepCoords) {
+                    cropCoords = {
+                        setpoint: null,
+                        airtemp: null
+                };
+            }
+            
 
             imageElement.src = '';
             imageElement.classList.add('hidden');
