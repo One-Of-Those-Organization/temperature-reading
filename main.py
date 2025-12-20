@@ -271,102 +271,97 @@ def get_state():
         "regions": LAST_REGIONS
     })
 
-@app.route('/api/set-image', methods=['POST'])
-def set_image():
-    if model is None:
-        return jsonify({
-            "status": 1,
-            "message": "Model belum dimuat"
-            }), 500
-
+@app.route('/api/config', methods=['POST'])
+def set_config():
     try:
         payload = request.get_json()
 
-        image_b64 = payload.get('image', '')
-        regions = payload.get('region', [])
-        source_type = payload.get('source', 'camera')
+        image_b64 = payload.get('image')
+        regions = payload.get('region')
 
-        # Validasi
-        if not image_b64 or not regions:
-            return jsonify({
-                "status": 2,
-                "message": "Image atau region kosong"
-                }), 400
+        if not image_b64 or not regions or len(regions) != 2:
+            return jsonify({"status": 1, "message": "Invalid config"}), 400
 
-        if len(regions) != 2:
-            return jsonify({
-                "status": 3,
-                "message": "Untuk saat ini region harus 2 rect"
-                }), 406
-
-        # Decode base64
         if "," in image_b64:
             image_b64 = image_b64.split(",")[1]
 
         image_bytes = base64.b64decode(image_b64)
         img = Image.open(io.BytesIO(image_bytes)).convert("RGB")
 
-        results = []
-
-        global LAST_IMAGE_B64, LAST_REGIONS
-        normalized_regions = []
         img_w, img_h = img.size
+        normalized = []
 
         for r in regions:
             x, y, w, h = normalize_region(r, img_w, img_h)
-            normalized_regions.append({
-                "x": x,
-                "y": y,
-                "w": w,
-                "h": h
-            })
+            normalized.append({"x": x, "y": y, "w": w, "h": h})
 
+        global LAST_IMAGE_B64, LAST_REGIONS
         LAST_IMAGE_B64 = image_b64
-        LAST_REGIONS = normalized_regions
+        LAST_REGIONS = normalized
         save_state()
 
+        return jsonify({
+            "status": 0,
+            "message": "Configuration saved",
+            "regions": normalized
+        })
+
+    except Exception as e:
+        return jsonify({"status": 9, "message": str(e)}), 500
+
+@app.route('/api/process', methods=['POST'])
+def process_image():
+    if model is None:
+        return jsonify({"status": 1, "message": "Model not loaded"}), 500
+
+    if not LAST_REGIONS:
+        return jsonify({"status": 2, "message": "No configuration set"}), 409
+
+    try:
+        payload = request.get_json()
+        image_b64 = payload.get('image')
+        source = payload.get('source', 'unknown')
+
+        if not image_b64:
+            return jsonify({"status": 3, "message": "Image missing"}), 400
+
+        if "," in image_b64:
+            image_b64 = image_b64.split(",")[1]
+
+        img_bytes = base64.b64decode(image_b64)
+        img = Image.open(io.BytesIO(img_bytes)).convert("RGB")
+
         img_w, img_h = img.size
+        results = []
 
-        for idx, r in enumerate(regions):
+        for idx, r in enumerate(LAST_REGIONS):
             x, y, w, h = normalize_region(r, img_w, img_h)
-            crop_img = img.crop((x, y, x + w, y + h))
+            crop = img.crop((x, y, x + w, y + h))
 
-            # Convert crop to bytes
             buf = io.BytesIO()
-            crop_img.save(buf, format="PNG")
-            crop_bytes = buf.getvalue()
+            crop.save(buf, format="PNG")
 
-            text = predict_image(crop_bytes)
+            text = predict_image(buf.getvalue())
+            results.append(text)
 
-            results.append({
-                "index": idx,
-                "value": text
-                })
-
-        # Susun data hasil
         result_data = {
-                "setpoint_code": results[0]["value"],
-                "air_temperature": results[1]["value"],
-                "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-                "source": source_type
-                }
+            "setpoint_code": results[0],
+            "air_temperature": results[1],
+            "source": source,
+            "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        }
 
         mqtt_success = publish_to_mqtt(result_data)
         result_data["mqtt_published"] = mqtt_success
 
         return jsonify({
             "status": 0,
-            "message": "Image processed",
             "data": result_data
-            })
+        })
 
     except Exception as e:
-        print("Set Image Error:", e)
-        print(traceback.format_exc())
-        return jsonify({
-            "status": 9,
-            "message": str(e)
-            }), 500
+        return jsonify({"status": 9, "message": str(e)}), 500
+
 
 
 @app.route('/api/read-meter', methods=['POST'])
