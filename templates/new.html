@@ -1,0 +1,169 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>LCD OCR Cropper</title>
+
+<!-- Cropper.js -->
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/cropperjs/1.5.13/cropper.min.css"/>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/cropperjs/1.5.13/cropper.min.js"></script>
+
+
+  <style>
+    body {
+      font-family: sans-serif;
+      background: #111;
+      color: #eee;
+      padding: 20px;
+    }
+
+    img {
+      max-width: 100%;
+      border: 1px solid #444;
+    }
+
+    .container {
+      display: flex;
+      gap: 20px;
+    }
+
+    .panel {
+      flex: 1;
+    }
+
+    button {
+      padding: 10px 16px;
+      margin-top: 10px;
+      cursor: pointer;
+    }
+  </style>
+</head>
+<body>
+
+<h2>LCD OCR Region Selector</h2>
+
+<input type="file" id="fileInput" accept="image/*">
+
+<div class="container">
+  <div class="panel">
+    <h3>Setpoint</h3>
+    <img id="img1">
+  </div>
+
+  <div class="panel">
+    <h3>Air Temperature</h3>
+    <img id="img2">
+  </div>
+</div>
+
+<button id="sendBtn">Send to Backend</button>
+
+<pre id="result"></pre>
+
+<script>
+let cropper1 = null
+let cropper2 = null
+let currentImage = null
+
+const img1 = document.getElementById('img1')
+const img2 = document.getElementById('img2')
+const fileInput = document.getElementById('fileInput')
+const resultBox = document.getElementById('result')
+
+/* ===============================
+   INIT FROM BACKEND STATE
+================================ */
+fetch('/api/state')
+  .then(r => r.json())
+  .then(data => {
+    if (data.status === 0) {
+      loadImage(data.image, data.regions)
+    }
+  })
+
+/* ===============================
+   LOAD IMAGE
+================================ */
+function loadImage(base64, regions = []) {
+  currentImage = base64
+  img1.src = base64
+  img2.src = base64
+
+  destroyCroppers()
+
+  img1.onload = () => {
+    cropper1 = new Cropper(img1, {
+      viewMode: 1,
+      autoCropArea: 0.2,
+      ready() {
+        if (regions[0]) cropper1.setData(regions[0])
+      }
+    })
+  }
+
+  img2.onload = () => {
+    cropper2 = new Cropper(img2, {
+      viewMode: 1,
+      autoCropArea: 0.2,
+      ready() {
+        if (regions[1]) cropper2.setData(regions[1])
+      }
+    })
+  }
+}
+
+function destroyCroppers() {
+  if (cropper1) cropper1.destroy()
+  if (cropper2) cropper2.destroy()
+  cropper1 = cropper2 = null
+}
+
+/* ===============================
+   FILE INPUT
+================================ */
+fileInput.addEventListener('change', e => {
+  const file = e.target.files[0]
+  if (!file) return
+
+  const reader = new FileReader()
+  reader.onload = () => loadImage(reader.result)
+  reader.readAsDataURL(file)
+})
+
+/* ===============================
+   SEND TO BACKEND
+================================ */
+document.getElementById('sendBtn').onclick = () => {
+  if (!cropper1 || !cropper2) {
+    alert('Cropper belum siap')
+    return
+  }
+
+  const regions = [
+    cropper1.getData(true),
+    cropper2.getData(true)
+  ]
+
+  const payload = {
+    image: currentImage,
+    region: regions,
+    source: 'frontend'
+  }
+
+  fetch('/api/set-image', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload)
+  })
+  .then(r => r.json())
+  .then(data => {
+    resultBox.textContent = JSON.stringify(data, null, 2)
+  })
+  .catch(err => {
+    resultBox.textContent = err.toString()
+  })
+}
+</script>
+
+</body>
+</html>

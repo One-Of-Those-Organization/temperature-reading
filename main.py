@@ -158,6 +158,46 @@ transform_pipeline = transforms.Compose([
 # ==========================================
 # FLASK APP SETUP
 # ==========================================
+
+def normalize_region(r, img_w, img_h):
+    """
+    Normalize cropper.js region data
+    """
+    x = int(round(r.get("x", 0)))
+    y = int(round(r.get("y", 0)))
+    w = int(round(r.get("width", 0)))
+    h = int(round(r.get("height", 0)))
+
+    # clamp supaya tidak keluar image
+    x = max(0, min(x, img_w - 1))
+    y = max(0, min(y, img_h - 1))
+    w = max(1, min(w, img_w - x))
+    h = max(1, min(h, img_h - y))
+
+    return x, y, w, h
+
+LAST_IMAGE_B64 = None
+LAST_REGIONS = []   # [{x,y,w,h}, {x,y,w,h}]
+STATE_FILE = "data/state.json"
+
+if os.path.exists(STATE_FILE):
+    try:
+        with open(STATE_FILE, "r") as f:
+            state = json.load(f)
+            LAST_IMAGE_B64 = state.get("image")
+            LAST_REGIONS = state.get("regions", [])
+            print("State loaded")
+    except:
+        print("State rusak, abaikan")
+
+def save_state():
+    os.makedirs(os.path.dirname(STATE_FILE), exist_ok=True)
+    with open(STATE_FILE, "w") as f:
+        json.dump({
+            "image": LAST_IMAGE_B64,
+            "regions": LAST_REGIONS
+        }, f, indent=4)
+
 app = Flask(__name__)
 data = "data/data.json"
 
@@ -212,6 +252,121 @@ def predict_image(image_bytes):
 @app.route('/')
 def index():
     return render_template('index.html')
+
+@app.route('/new')
+def newroute():
+    return render_template('new.html')
+
+@app.route('/api/state', methods=['GET'])
+def get_state():
+    if LAST_IMAGE_B64 is None:
+        return jsonify({
+            "status": 1,
+            "message": "Belum ada image"
+        })
+
+    return jsonify({
+        "status": 0,
+        "image": LAST_IMAGE_B64,
+        "regions": LAST_REGIONS
+    })
+
+@app.route('/api/set-image', methods=['POST'])
+def set_image():
+    if model is None:
+        return jsonify({
+            "status": 1,
+            "message": "Model belum dimuat"
+            }), 500
+
+    try:
+        payload = request.get_json()
+
+        image_b64 = payload.get('image', '')
+        regions = payload.get('region', [])
+        source_type = payload.get('source', 'camera')
+
+        # Validasi
+        if not image_b64 or not regions:
+            return jsonify({
+                "status": 2,
+                "message": "Image atau region kosong"
+                }), 400
+
+        if len(regions) != 2:
+            return jsonify({
+                "status": 3,
+                "message": "Untuk saat ini region harus 2 rect"
+                }), 406
+
+        # Decode base64
+        if "," in image_b64:
+            image_b64 = image_b64.split(",")[1]
+
+        image_bytes = base64.b64decode(image_b64)
+        img = Image.open(io.BytesIO(image_bytes)).convert("RGB")
+
+        results = []
+
+        global LAST_IMAGE_B64, LAST_REGIONS
+        normalized_regions = []
+        img_w, img_h = img.size
+
+        for r in regions:
+            x, y, w, h = normalize_region(r, img_w, img_h)
+            normalized_regions.append({
+                "x": x,
+                "y": y,
+                "w": w,
+                "h": h
+            })
+
+        LAST_IMAGE_B64 = image_b64
+        LAST_REGIONS = normalized_regions
+        save_state()
+
+        img_w, img_h = img.size
+
+        for idx, r in enumerate(regions):
+            x, y, w, h = normalize_region(r, img_w, img_h)
+            crop_img = img.crop((x, y, x + w, y + h))
+
+            # Convert crop to bytes
+            buf = io.BytesIO()
+            crop_img.save(buf, format="PNG")
+            crop_bytes = buf.getvalue()
+
+            text = predict_image(crop_bytes)
+
+            results.append({
+                "index": idx,
+                "value": text
+                })
+
+        # Susun data hasil
+        result_data = {
+                "setpoint_code": results[0]["value"],
+                "air_temperature": results[1]["value"],
+                "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                "source": source_type
+                }
+
+        mqtt_success = publish_to_mqtt(result_data)
+        result_data["mqtt_published"] = mqtt_success
+
+        return jsonify({
+            "status": 0,
+            "message": "Image processed",
+            "data": result_data
+            })
+
+    except Exception as e:
+        print("Set Image Error:", e)
+        print(traceback.format_exc())
+        return jsonify({
+            "status": 9,
+            "message": str(e)
+            }), 500
 
 
 @app.route('/api/read-meter', methods=['POST'])
