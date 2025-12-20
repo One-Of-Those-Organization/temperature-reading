@@ -530,6 +530,11 @@
         async function sendData(isAuto = false) {
             const resultBox = document.getElementById('resultBox');
 
+            if (!cropData.setpoint || !cropData.airtemp) {
+                alert("Preview gambar crop belum ter-generate, silhakan crop ulang");
+                return;
+            }
+
             // Make sure crop coords are set
             if (!cropCoords.setpoint || !cropCoords.airtemp) {
                 alert("Crop area belum ditentukan. Silakan set crop dulu.");
@@ -635,9 +640,11 @@
         }
 
         // Load Config from Backend
+        /*
         async function loadConfig() {
             try {
                 const response = await fetch('/api/get-coords');
+                // const response = await fetch('/api/state');
                 const json = await response.json();
 
                 if (json.status !== 0) {
@@ -716,6 +723,120 @@
 
             } catch (err) {
                 console.error(err);
+            }
+        }
+        */
+
+        // Load Config from Backend
+        async function loadConfig() {
+            try {
+                // ✅ CHANGE: Use /api/state instead of /api/get-coords
+                const response = await fetch('/api/state');
+                const json = await response.json();
+
+                if (json.status !== 0) {
+                    console.warn("Gagal mengambil konfigurasi:  " + (json.message || "Unknown error"));
+                    return;
+                }
+
+                const regions = json.regions;
+                const savedImage = json.image; // ✅ GET IMAGE FROM BACKEND
+
+                if (!regions || !regions.length || regions.length < 2) {
+                    console. warn("Konfigurasi tidak lengkap, silakan set crop manual.");
+                    return;
+                }
+
+                // ✅ Update cropCoords from backend
+                cropCoords. setpoint = regions[0];
+                cropCoords.airtemp = regions[1];
+
+                console.log("✅ Loaded coords from backend:", cropCoords);
+
+                // ✅ CHECK:  If there's saved image, load it to cropper
+                if (! savedImage) {
+                    console. warn("Tidak ada gambar tersimpan di backend.");
+                    return;
+                }
+
+                // ✅ Prepare image with data: image prefix if needed
+                const imageUrl = savedImage.startsWith('data:') ? savedImage : `data:image/jpeg;base64,${savedImage}`;
+                
+                // ✅ Set image to element
+                imageElement.src = imageUrl;
+                imageElement.classList.remove('hidden');
+                document.getElementById('placeholder-text').classList.add('hidden');
+                document.querySelector('#cropType button').classList.remove('hidden');
+                document.getElementById('cropControls').classList.remove('hidden');
+                document.getElementById('cropControls').classList.add('flex');
+
+                // ✅ Wait for image to load
+                imageElement.onload = () => {
+                    console.log("✅ Image loaded, initializing cropper...");
+
+                    // Destroy old cropper if exists
+                    if (cropper) cropper.destroy();
+
+                    // Create new cropper
+                    cropper = new Cropper(imageElement, {
+                        viewMode: 1,
+                        autoCropArea:  0.6,
+                        background: false,
+                        ready() {
+                            console.log("✅ Cropper ready, generating previews...");
+
+                            // Generate Setpoint Preview
+                            if (cropCoords.setpoint) {
+                                cropper.setData(cropCoords.setpoint);
+                                const spCanvas = cropper.getCroppedCanvas({
+                                    maxWidth: 800,
+                                    fillColor: '#fff'
+                                });
+                                
+                                if (spCanvas) {
+                                    cropData.setpoint = spCanvas.toDataURL('image/jpeg', 0.9);
+                                    const spPreview = document.getElementById('preview-setpoint');
+                                    spPreview.src = cropData. setpoint;
+                                    spPreview.classList.remove('hidden');
+                                    document.getElementById('txt-setpoint').classList.add('hidden');
+                                    console.log("✅ Setpoint preview generated");
+                                }
+                            }
+
+                            // Generate Air Temp Preview
+                            if (cropCoords.airtemp) {
+                                cropper.setData(cropCoords. airtemp);
+                                const airCanvas = cropper.getCroppedCanvas({
+                                    maxWidth: 800,
+                                    fillColor: '#fff'
+                                });
+                                
+                                if (airCanvas) {
+                                    cropData.airtemp = airCanvas.toDataURL('image/jpeg', 0.9);
+                                    const airPreview = document.getElementById('preview-airtemp');
+                                    airPreview. src = cropData.airtemp;
+                                    airPreview. classList.remove('hidden');
+                                    document.getElementById('txt-airtemp').classList.add('hidden');
+                                    console.log("✅ Air temp preview generated");
+                                }
+                            }
+
+                            // ✅ Lock UI and enable process button
+                            lockCropUI();
+                            checkReady();
+                            
+                            console.log("✅ Config fully loaded and ready!");
+                        }
+                    });
+                };
+
+                imageElement.onerror = () => {
+                    console.error("Failed to load image from backend");
+                    alert("Gagal memuat gambar dari server. Silakan upload ulang.");
+                };
+
+            } catch (err) {
+                console.error("Error loading config:", err);
             }
         }
 
