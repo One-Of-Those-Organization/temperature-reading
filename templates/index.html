@@ -202,10 +202,12 @@
 
         fileInput.addEventListener('change', function(e) {
             const file = e.target.files[0];
+            console.log("Selected file:", file);
             if (file) {
                 const reader = new FileReader();
                 reader.onload = (evt) => {
                     originalFileBase64 = evt.target.result;
+                    console.log("Loaded file base64:", originalFileBase64);
 
                     // Uncomment this if want to reset crop data on new upload
                     // cropData = {
@@ -238,36 +240,37 @@
             resetBtn.disabled = false;
         }
 
-        // Reset Cropper UI
         function resetCropper() {
+            if (!originalFileBase64) {
+                alert("Tidak ada gambar untuk di-reset");
+                return;
+            }
+
+            console.log("Before Reset:", originalFileBase64);
+
+            // Destroy existing cropper
             if (cropper) {
                 cropper.destroy();
                 cropper = null;
             }
 
-            // Unlock set new crop
+            // Unlock UI
             cropLocked = false;
 
-            // Clear Data
-            fileInput.value = '';
-
-            // Reset Crop Coords
+            // Clear crop coords
             cropCoords = {
                 setpoint: null,
                 airtemp: null
             };
 
+            // Clear crop data
             cropData = {
                 setpoint: null,
                 airtemp: null
             };
 
-            imageElement.src = '';
-            imageElement.classList.add('hidden');
-            document.getElementById('placeholder-text').classList.remove('hidden');
-
-            const previews = ['setpoint', 'airtemp'];
-            previews.forEach(type => {
+            // Reset preview
+            ['setpoint', 'airtemp'].forEach(type => {
                 const img = document.getElementById(`preview-${type}`);
                 const txt = document.getElementById(`txt-${type}`);
                 img.src = '';
@@ -279,17 +282,19 @@
             // Hide reset button
             document.querySelector('#cropType button').classList.add('hidden');
 
-            // Enable crop buttons again
+            // Enable crop buttons
             document.querySelectorAll('#cropControls button').forEach(btn => {
                 btn.disabled = false;
                 btn.classList.remove('opacity-50', 'cursor-not-allowed');
             });
 
-            document.getElementById('cropControls').classList.add('hidden');
-            document.getElementById('cropControls').classList.remove('flex');
-
+            // Disable process button until new crops are set
             btnProcess.disabled = true;
             btnProcess.innerHTML = "Lengkapi Setpoint & Air Temp";
+
+            // Re-initialize cropper without applying old coords
+            setupCropper(originalFileBase64, false);
+            console.log("Init cropper after reset coords: ", originalFileBase64)
         }
 
         function setupCropper(imageUrl, applyOldCoords = false) {
