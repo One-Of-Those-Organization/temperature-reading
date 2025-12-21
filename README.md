@@ -119,15 +119,3 @@ Pastikan model berada di `model/lcd_best.pt`.
 
 - `POST /api/process`  
   Proses utama: kirim gambar yang sudah di-crop manual untuk inferensi.
-
----
-
-## Diketahui/Masalah
-
-- **Isu: Restore otomatis crop area dari koordinat (coords) dan gambar base64 ke Cropper.js**  
-  TIDAK berhasil pada sebagian kasus (khusus di project ini).  
-  User _harus_ crop manual (drag) setiap kali gambar di-load,  
-  karena cropping otomatis memakai coords JSON/backend **tidak stabil/gagal** di frontend (biarpun sudah sesuai teori best-practice, kemungkinan bug/limitation Cropper.js versi tertentu).
-
-- **No professional todo-list**  
-  Tidak ada implementasi todo/kanban/fitur manajemen profesional di repo ini.
