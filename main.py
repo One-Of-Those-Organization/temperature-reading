@@ -34,18 +34,27 @@ if os.path.exists(STATE_FILE):
         with open(STATE_FILE, "r") as f:
             state = json.load(f)
             LAST_IMAGE_B64 = state.get("image")
+            CROP_SETPOINT_B64 = state.get("crop_setpoint")
+            CROP_AIRTEMP_B64 = state.get("crop_airtemp")
             LAST_REGIONS = state.get("regions", [])
-            print("State loaded")
-    except:
-        print("State rusak, abaikan")
+        print("State lengkap berhasil diload")
+    except Exception as e:
+        print("State rusak, abaikan:", e)
 
 def save_state():
     os.makedirs(os.path.dirname(STATE_FILE), exist_ok=True)
-    with open(STATE_FILE, "w", encoding="utf-8") as f:
-        json.dump({
-            "image": LAST_IMAGE_B64,
-            "regions": LAST_REGIONS
-        }, f, indent=4)
+    state_data = {
+        "image": LAST_IMAGE_B64,
+        "crop_setpoint": CROP_SETPOINT_B64,
+        "crop_airtemp": CROP_AIRTEMP_B64,
+        "regions": LAST_REGIONS
+    }
+    try:
+        with open(STATE_FILE, "w", encoding="utf-8") as f:
+            json.dump(state_data, f, indent=4)
+        print("State tersimpan dengan lengkap")
+    except Exception as e:
+        print("Gagal menyimpan state:", e)
 
 # ==========================================
 # MQTT CALLBACKS
@@ -214,28 +223,44 @@ def normalize_region(r, img_w, img_h):
 # ==========================================
 app = Flask(__name__)
 
+# Home route
 @app.route('/')
 def index():
     return render_template('index.html')
 
+# New route for configuration
 @app.route('/new')
 def newroute():
     return render_template('new.html')
 
+# API to get current state
 @app.route('/api/state', methods=['GET'])
 def get_state():
     if LAST_IMAGE_B64 is None:
-        return jsonify({"status": 1, "message": "Belum ada image"})
-    return jsonify({"status": 0, "image": LAST_IMAGE_B64, "regions": LAST_REGIONS})
+        return jsonify({"status": 1,
+                        "message": "Belum ada image"
+                        }), 404
 
+    return jsonify({"status": 0,
+                    "image": LAST_IMAGE_B64,
+                    "crop_setpoint": CROP_SETPOINT_B64,
+                    "crop_airtemp": CROP_AIRTEMP_B64,
+                    "regions": LAST_REGIONS
+                    })
+
+# API to set configuration (crop regions)
 @app.route('/api/config', methods=['POST'])
 def set_config():
     try:
         payload = request.get_json()
         image_b64 = payload.get('image')
         regions = payload.get('region')
+
         if not image_b64 or not regions or len(regions) != 2:
-            return jsonify({"status": 3, "message": "Invalid config"}), 400
+            return jsonify({"status": 2,
+                            "message": "Invalid config"
+                            }), 400
+
         if "," in image_b64: image_b64 = image_b64.split(",")[1]
         img_bytes = base64.b64decode(image_b64)
         img = Image.open(io.BytesIO(img_bytes)).convert("RGB")
@@ -244,26 +269,40 @@ def set_config():
         for r in regions:
             x, y, w, h = normalize_region(r, img_w, img_h)
             normalized.append({"x": x, "y": y, "w": w, "h": h})
-        global LAST_IMAGE_B64, LAST_REGIONS
+        global LAST_IMAGE_B64, LAST_REGIONS, CROP_SETPOINT_B64, CROP_AIRTEMP_B64
         LAST_IMAGE_B64 = image_b64
         LAST_REGIONS = normalized
+        CROP_SETPOINT_B64 = payload.get("setpoint_crop_image", CROP_SETPOINT_B64)
+        CROP_AIRTEMP_B64 = payload.get("airtemp_crop_image", CROP_AIRTEMP_B64)
         save_state()
-        return jsonify({"status": 0, "message": "Configuration saved", "regions": normalized})
+        return jsonify({"status": 0,
+                        "message": "Configuration saved",
+                        "regions": normalized
+                        })
     except Exception as e:
-        return jsonify({"status": 4, "message": f"Server Error: {str(e)}"}), 500
+        return jsonify({"status": 3,
+                        "message": f"Server Error: {str(e)}"
+                        }), 500
 
+# API to Process image and return predictions
 @app.route('/api/process', methods=['POST'])
 def process_image():
     if model is None:
-        return jsonify({"status": 5, "message": "Model not loaded"}), 500
+        return jsonify({"status": 4,
+                        "message": "Model not loaded"
+                        }), 500
     if not LAST_REGIONS:
-        return jsonify({"status": 6, "message": "No configuration set"}), 400
+        return jsonify({"status": 5,
+                        "message": "No configuration set"
+                        }), 400
     try:
         payload = request.get_json()
         image_b64 = payload.get('image')
         source = payload.get('source', 'unknown')
         if not image_b64:
-            return jsonify({"status": 7, "message": "Image missing"}), 400
+            return jsonify({"status": 6,
+                            "message": "Image missing"
+                            }), 400
         if "," in image_b64: image_b64 = image_b64.split(",")[1]
         img_bytes = base64.b64decode(image_b64)
         img = Image.open(io.BytesIO(img_bytes)).convert("RGB")
@@ -303,32 +342,51 @@ def process_image():
             print("Failed to write data.json:", e_write)
         return jsonify({"status": 0, "data": result_data})
     except Exception as e:
-        return jsonify({"status": 8, "message": str(e)}), 500
+        return jsonify({"status": 7,
+                        "message": str(e)
+                        }), 500
 
+# API to get crop coordinates
 @app.route('/api/get-coords', methods=['GET'])
 def get_coords():
     if not os.path.exists(STATE_FILE):
-        return jsonify({"status": 9, "message": "No crop configuration found", "data": None}), 404
+        return jsonify({"status": 8,
+                        "message": "No crop configuration found",
+                        "data": None
+                        }), 404
     try:
         with open(STATE_FILE, "r") as f:
             data = json.load(f)
         if "regions" not in data:
-            return jsonify({"status": 10, "message": "Invalid config file", "data": None}), 400
+            return jsonify({"status": 9,
+                            "message": "Invalid config file",
+                            "data": None
+                            }), 400
         return jsonify({"status": 0, "message": "Crop config loaded", "data": data["regions"]})
     except Exception as e:
-        return jsonify({"status": 11, "message": f"Server error: {str(e)}", "data": None}), 500
+        return jsonify({"status": 10,
+                        "message": f"Server error: {str(e)}",
+                        "data": None
+                        }), 500
 
+# Public API to get meter data history
 @app.route('/api/get-meter', methods=['GET'])
 def get_meter():
     if not os.path.exists(DATA_FILE):
-        return jsonify({"status": 12, "message": "Data tidak ditemukan pada Server!"}), 400
+        return jsonify({"status": 11,
+                        "message": "Data tidak ditemukan pada Server!"
+                        }), 400
     try:
         with open(DATA_FILE, "r") as f:
             data_content = json.load(f)
         return jsonify({"status": 0, "message": "Send Data", "data": data_content})
     except Exception as e:
-        return jsonify({"status": 13, "message": f"Server Error: {str(e)}", "data": None}), 500
+        return jsonify({"status": 12,
+                        "message": f"Server Error: {str(e)}",
+                        "data": None
+                        }), 500
 
+# Server start on localhost:5000
 if __name__ == '__main__':
     print("Server berjalan di http://localhost:5000")
     app.run(host='0.0.0.0', port=5000, debug=True)
