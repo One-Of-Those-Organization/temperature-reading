@@ -191,6 +191,9 @@
             // Take data from canvas
             const dataUrl = canvas.toDataURL('image/jpeg');
 
+            // Load Original File Base64
+            originalFileBase64 = dataUrl;
+
             // Setup cropper + auto crop jika koordinat lama ada
             setupCropper(dataUrl, true);
         }
@@ -527,7 +530,7 @@
                 btnProcess.innerHTML = "Sedang Memproses...";
             }
 
-            if (originalFileBase64) {
+            if (!originalFileBase64) {
                 alert("Image source is empty!");
                 return;
             }
