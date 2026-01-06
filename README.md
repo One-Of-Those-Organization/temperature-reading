@@ -6,19 +6,6 @@ Sistem ini menggantikan metode OCR konvensional (seperti Tesseract) dengan arsit
 
 ---
 
-## Daftar Isi
-- [Project Overview](#project-overview)
-- [Metodologi & Arsitektur AI](#metodologi--arsitektur-ai)
-- [Struktur Project](#struktur-project)
-- [Prasarat (Requirements)](#prasarat-requirements)
-- [Cara Menjalankan (Installation & Run)](#cara-menjalankan-installation--run)
-- [Cara Penggunaan](#cara-penggunaan)
-- [API](#api)
-- [Diketahui/Masalah](#diketahuimasalah)
-- [License](#license)
-
----
-
 ## Project Overview
 
 Dalam industri logistik *cold chain*, pemantauan suhu kontainer sangat krusial. Proyek ini memungkinkan pengguna untuk mengunggah foto panel suhu, memilih area angka (Setpoint & Air Temperature) melalui antarmuka web, dan mendapatkan hasil pembacaan digital secara *real-time*.
@@ -51,15 +38,17 @@ temperature-reading/
 │
 │── data/
 │   └── data.json            # Seluruh history (100 data terbaru)
+│   └── state.json           # Data Koordinat Gambar
 │
 ├── model/
 │   └── lcd_best.pt          # Bobot model PyTorch (CRNN)
 │
 ├── static/
-│   └── ukdc.png             # Aset (logo, dsb)
+│   └── if_ukdc.png             # Aset (logo, dsb)
 │
 ├── templates/
-│   └── index.html           # Frontend web (HTML + JS + Tailwind CSS)
+│   └── index.html           # Frontend web (HTML + JS + Tailwind CSS) Version 1
+│   └── new.html             # Frontend web (HTML + JS + Tailwind CSS) Version 2
 │
 ├── main.py                  # Backend utama (Flask)
 ├── README.md                # Ini file dokumentasi
@@ -105,17 +94,17 @@ Pastikan model berada di `model/lcd_best.pt`.
 
 ## API
 
-- `POST /api/read-meter`  
+- `GET /api/state`  
+  Ambil riwayat gambar sebelumnya.
+
+- `POST /api/config`  
+  Simpan region/crop config dari frontend di data/state.json.
+
+- `GET /api/get-coords`  
+  Ambil riwayat koord dari data/state.json.
+
+- `POST /api/process`  
   Kirim gambar/crop untuk inferensi model, hasil disimpan di data/data.json.
 
 - `GET /api/get-meter`  
   Ambil riwayat (up to 100 data terbaru) untuk keperluan tampilan/integrasi.
-
-- `POST /api/config`  
-  Simpan region/crop config dari frontend.
-
-- `GET /api/get-coords`  
-  Mendapatkan konfigurasi crop terakhir/set dari backend.
-
-- `POST /api/process`  
-  Proses utama: kirim gambar yang sudah di-crop manual untuk inferensi.
