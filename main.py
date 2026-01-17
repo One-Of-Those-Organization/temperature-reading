@@ -2,7 +2,6 @@ import os
 import io
 import json
 import base64
-import traceback
 import torch
 import torch.nn as nn
 from torchvision import transforms
@@ -39,8 +38,9 @@ if os.path.exists(STATE_FILE):
             LAST_REGIONS = state.get("regions", [])
         print("State lengkap berhasil diload")
     except Exception as e:
-        print("State rusak, abaikan:", e)
+        print("File state.json not found or invalid, starting fresh")
 
+# Save state to file (base64 image and regions coords)
 def save_state():
     os.makedirs(os.path.dirname(STATE_FILE), exist_ok=True)
     state_data = {
@@ -49,12 +49,14 @@ def save_state():
         "crop_airtemp": CROP_AIRTEMP_B64,
         "regions": LAST_REGIONS
     }
+
+    # Write to file
     try:
         with open(STATE_FILE, "w", encoding="utf-8") as f:
             json.dump(state_data, f, indent=4)
-        print("State tersimpan dengan lengkap")
+        print("State successfully saved")
     except Exception as e:
-        print("Gagal menyimpan state:", e)
+        print("Failed to saving state:", e)
 
 # ==========================================
 # MQTT CALLBACKS
@@ -82,6 +84,7 @@ mqttc.on_message = on_message
 mqttc.on_publish = on_publish
 mqttc.on_disconnect = on_disconnect
 
+# Try to connect to MQTT Broker
 try:
     mqttc.connect(MQTT_BROKER, MQTT_PORT, MQTT_KEEPALIVE)
     mqttc.loop_start()
@@ -89,6 +92,7 @@ try:
 except Exception as e:
     print(f"MQTT Connection Error: {e}")
 
+# Publish data to MQTT
 def publish_to_mqtt(data):
     try:
         payload = json.dumps(data)
@@ -112,9 +116,11 @@ itos = {i: ch for i, ch in enumerate(ALPHABET)}
 itos[len(itos)] = BLANK
 NUM_CLASSES = len(itos)
 
+# Load CRNN Model
 class CRNN(nn.Module):
     def __init__(self, num_classes, in_ch=1):
         super().__init__()
+        # CRNN Backbone
         self.cnn = nn.Sequential(
             nn.Conv2d(in_ch, 64, 3, padding=1), nn.BatchNorm2d(64), nn.ReLU(inplace=True),
             nn.MaxPool2d(2, 2),
@@ -136,6 +142,7 @@ class CRNN(nn.Module):
             nn.Linear(192, num_classes)
         )
 
+    # Forward pass definition
     def forward(self, x):
         feats = self.cnn(x)
         B, C, H, W = feats.shape
@@ -145,6 +152,7 @@ class CRNN(nn.Module):
         logits = self.head(out)
         return logits
 
+# CTC Decoding
 def ctc_decode(logits):
     probs = logits.softmax(-1)
     best = probs.argmax(-1)
@@ -164,6 +172,7 @@ def ctc_decode(logits):
         results.append(text)
     return results
 
+# Image Transformation Pipeline
 def pad_to_width(img, target_width=192):
     w, h = img.size
     if w >= target_width:
@@ -172,6 +181,7 @@ def pad_to_width(img, target_width=192):
     pad_right = target_width - w - pad_left
     return ImageOps.expand(img, border=(pad_left, 0, pad_right, 0), fill=128)
 
+# Define transformation pipeline
 transform_pipeline = transforms.Compose([
     transforms.Grayscale(num_output_channels=1),
     transforms.Lambda(ImageOps.autocontrast),
@@ -181,9 +191,10 @@ transform_pipeline = transforms.Compose([
     transforms.Normalize(mean=[0.5], std=[0.5]),
 ])
 
+# Load the pre-trained model
 DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
 MODEL_PATH = "model/lcd_best.pt"
-model = None
+model = None # Initialize model variable
 try:
     checkpoint = torch.load(MODEL_PATH, map_location=DEVICE)
     model = CRNN(NUM_CLASSES).to(DEVICE)
@@ -196,6 +207,7 @@ try:
 except Exception as e:
     print(f"ERROR MEMUAT MODEL: {e}")
 
+# Start prediction on image bytes
 def predict_image(image_bytes):
     try:
         img = Image.open(io.BytesIO(image_bytes)).convert("RGB")
@@ -207,6 +219,7 @@ def predict_image(image_bytes):
         print(f"Prediction Error: {e}")
         return "Error"
 
+# Normalize region coordinates
 def normalize_region(r, img_w, img_h):
     x = int(round(r.get("x", 0)))
     y = int(round(r.get("y", 0)))
@@ -238,71 +251,107 @@ def newroute():
 def get_state():
     if LAST_IMAGE_B64 is None:
         return jsonify({"status": 1,
-                        "message": "Belum ada image"
-                        }), 404
+                        "image": None,
+                        "crop_setpoint": None,
+                        "crop_airtemp": None,
+                        "message": "Belum ada image",
+                        "regions": []
+                        }), 202
 
+    # Return current state
     return jsonify({"status": 0,
                     "image": LAST_IMAGE_B64,
                     "crop_setpoint": CROP_SETPOINT_B64,
                     "crop_airtemp": CROP_AIRTEMP_B64,
+                    "message": "State loaded",
                     "regions": LAST_REGIONS
-                    })
+                    }), 200
 
 # API to set configuration (crop regions)
 @app.route('/api/config', methods=['POST'])
 def set_config():
     try:
         payload = request.get_json()
+        if not payload:
+            return jsonify({"status": 2,
+                            "message": "Invalid config",
+                            "regions": []
+                            }), 400
+
         image_b64 = payload.get('image')
         regions = payload.get('region')
 
         if not image_b64 or not regions or len(regions) != 2:
-            return jsonify({"status": 2,
-                            "message": "Invalid config"
+            return jsonify({"status": 3,
+                            "message": "Invalid config",
+                            "regions": []
                             }), 400
 
-        if "," in image_b64: image_b64 = image_b64.split(",")[1]
-        img_bytes = base64.b64decode(image_b64)
+        if "," in image_b64:
+            image_b64 = image_b64.split(",")[1]
+
+        try:
+            img_bytes = base64.b64decode(image_b64)
+        except Exception as e:
+            return jsonify({"status": 4,
+                            "message": "Invalid image data",
+                            "regions": []
+                            }), 400
+
         img = Image.open(io.BytesIO(img_bytes)).convert("RGB")
         img_w, img_h = img.size
+
         normalized = []
         for r in regions:
+            if not isinstance(r, dict):
+                raise ValueError("Region must be object")
             x, y, w, h = normalize_region(r, img_w, img_h)
             normalized.append({"x": x, "y": y, "w": w, "h": h})
+
         global LAST_IMAGE_B64, LAST_REGIONS, CROP_SETPOINT_B64, CROP_AIRTEMP_B64
         LAST_IMAGE_B64 = image_b64
         LAST_REGIONS = normalized
         CROP_SETPOINT_B64 = payload.get("setpoint_crop_image", CROP_SETPOINT_B64)
         CROP_AIRTEMP_B64 = payload.get("airtemp_crop_image", CROP_AIRTEMP_B64)
+
         save_state()
+
         return jsonify({"status": 0,
                         "message": "Configuration saved",
                         "regions": normalized
-                        })
+                        }), 200
+
     except Exception as e:
-        return jsonify({"status": 3,
-                        "message": f"Server Error: {str(e)}"
+        return jsonify({"status": 5,
+                        "message": f"Server Error: {str(e)}",
+                        "regions": []
                         }), 500
 
 # API to Process image and return predictions
 @app.route('/api/process', methods=['POST'])
 def process_image():
     if model is None:
-        return jsonify({"status": 4,
+        return jsonify({"status": 6,
                         "message": "Model not loaded"
                         }), 500
     if not LAST_REGIONS:
-        return jsonify({"status": 5,
+        return jsonify({"status": 7,
                         "message": "No configuration set"
                         }), 400
     try:
         payload = request.get_json()
+        if not payload:
+            return jsonify({"status": 8,
+                            "message": "Invalid payload"
+                            }), 400
+
         image_b64 = payload.get('image')
         source = payload.get('source', 'unknown')
         if not image_b64:
-            return jsonify({"status": 6,
+            return jsonify({"status": 9,
                             "message": "Image missing"
                             }), 400
+
         if "," in image_b64: image_b64 = image_b64.split(",")[1]
         img_bytes = base64.b64decode(image_b64)
         img = Image.open(io.BytesIO(img_bytes)).convert("RGB")
@@ -340,9 +389,11 @@ def process_image():
                 json.dump(history_data, f, ensure_ascii=False, indent=4)
         except Exception as e_write:
             print("Failed to write data.json:", e_write)
-        return jsonify({"status": 0, "data": result_data})
+        return jsonify({"status": 0,
+                        "data": result_data
+                        }), 200
     except Exception as e:
-        return jsonify({"status": 7,
+        return jsonify({"status": 10,
                         "message": str(e)
                         }), 500
 
@@ -350,7 +401,7 @@ def process_image():
 @app.route('/api/get-coords', methods=['GET'])
 def get_coords():
     if not os.path.exists(STATE_FILE):
-        return jsonify({"status": 8,
+        return jsonify({"status": 11,
                         "message": "No crop configuration found",
                         "data": None
                         }), 404
@@ -358,13 +409,16 @@ def get_coords():
         with open(STATE_FILE, "r") as f:
             data = json.load(f)
         if "regions" not in data:
-            return jsonify({"status": 9,
+            return jsonify({"status": 12,
                             "message": "Invalid config file",
                             "data": None
                             }), 400
-        return jsonify({"status": 0, "message": "Crop config loaded", "data": data["regions"]})
+        return jsonify({"status": 0,
+                        "message": "Crop config loaded",
+                        "data": data["regions"]
+                        }), 200
     except Exception as e:
-        return jsonify({"status": 10,
+        return jsonify({"status": 13,
                         "message": f"Server error: {str(e)}",
                         "data": None
                         }), 500
@@ -373,15 +427,18 @@ def get_coords():
 @app.route('/api/get-meter', methods=['GET'])
 def get_meter():
     if not os.path.exists(DATA_FILE):
-        return jsonify({"status": 11,
+        return jsonify({"status": 14,
                         "message": "Data tidak ditemukan pada Server!"
                         }), 400
     try:
         with open(DATA_FILE, "r") as f:
             data_content = json.load(f)
-        return jsonify({"status": 0, "message": "Send Data", "data": data_content})
+        return jsonify({"status": 0,
+                        "message": "Send Data",
+                        "data": data_content
+                        }), 200
     except Exception as e:
-        return jsonify({"status": 12,
+        return jsonify({"status": 15,
                         "message": f"Server Error: {str(e)}",
                         "data": None
                         }), 500

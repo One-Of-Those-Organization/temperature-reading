@@ -108,3 +108,8 @@ Pastikan model berada di `model/lcd_best.pt`.
 
 - `GET /api/get-meter`  
   Ambil riwayat (up to 100 data terbaru) untuk keperluan tampilan/integrasi.
+
+## DOCS (LateX)
+
+Untuk dokumentasi lengkap dalam format LaTeX, silakan kunjungi link berikut:
+[Documentation LateX](https://www.overleaf.com/read/phtkrcncrfcs#7ecf9d)

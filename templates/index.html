@@ -300,6 +300,7 @@
             console.log("Init cropper after reset coords: ", originalFileBase64)
         }
 
+        // Setup the CropperJS instance
         function setupCropper(imageUrl, applyOldCoords = false) {
             // Hancurkan cropper lama jika ada
             if (cropper) cropper.destroy();
@@ -312,21 +313,26 @@
             document.getElementById('cropControls').classList.remove('hidden');
             document.getElementById('cropControls').classList.add('flex');
 
+            // Set Timeout every 100ms to ensure image is loaded
             setTimeout(() => {
+                // Call CropperJS
                 cropper = new Cropper(imageElement, {
                     viewMode: 1,
                     autoCropArea: 0.6,
                     background: false,
                     ready() {
+                        // Check only if need to apply old coords
                         if (applyOldCoords) {
                             // Auto crop from old coords if available
                             ['setpoint', 'airtemp'].forEach(type => {
+                                // Get saved coords if not available, skip
                                 const coords = cropCoords[type];
                                 if (!coords) return;
 
                                 // Don't overwrite if already cropped
                                 if (cropData[type]) return;
 
+                                // Append crop area
                                 const canvasCrop = cropper.getCroppedCanvas({
                                     x: coords.x,
                                     y: coords.y,
@@ -335,8 +341,10 @@
                                     fillColor: '#fff'
                                 });
 
+                                // Save BASE64 IMAGE
                                 cropData[type] = canvasCrop.toDataURL('image/jpeg', 0.9);
 
+                                // Set preview
                                 const previewImg = document.getElementById(`preview-${type}`);
                                 const previewTxt = document.getElementById(`txt-${type}`);
                                 previewImg.src = cropData[type];
@@ -356,6 +364,7 @@
             }, 100);
         }
 
+        // Setup Process Button based on mode
         function setupProcessButton() {
             if (currentSource === 'camera') {
                 btnProcess.innerHTML = "MULAI AUTO CAPTURE (5 MENIT)";
@@ -381,6 +390,7 @@
                 return;
             }
 
+            // Get Cropped Canvas
             const canvasCrop = cropper.getCroppedCanvas({
                 maxWidth: 800,
                 fillColor: '#fff'
@@ -388,6 +398,7 @@
 
             console.log("cropImage Data: ", canvasCrop);
 
+            // If failed to crop
             if (!canvasCrop) {
                 alert("Gagal melakukan crop.");
                 return;
